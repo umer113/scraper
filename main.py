@@ -71,7 +71,7 @@ class BinaAzScraper:
             'name': name,
             'price': price,
             'address': address,
-            'description',description,
+            'description':description,
             'latitude': latitude,
             'longitude': longitude,
             'area': area,
