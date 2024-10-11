@@ -1,149 +1,88 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-import math
 import pandas as pd
+import re
 
-# Create the output directory if it doesn't exist
-output_dir = 'output'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+class BinaAzScraper:
+    def __init__(self, urls):
+        self.base_url = 'https://bina.az'
+        self.urls = urls
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+        }
+        # Create the output directory if it doesn't exist
+        self.output_dir = 'output'
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
-# URL of the page to scrape
-base_url = 'https://www.remax.sr/en/homes/homes-for-sale.html'
+    def fetch_page(self, url):
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return BeautifulSoup(response.text, 'html.parser')
 
-# Send a GET request to fetch the HTML content of the first page
-response = requests.get(base_url)
-soup = BeautifulSoup(response.text, 'html.parser')
+    def parse(self, soup):
+        data = []
+        # Extract property URLs
+        property_urls = [a['href'] for a in soup.select('a.item_link')]
+        for url in property_urls:
+            full_url = self.base_url + url
+            data.append(self.parse_property(full_url))
 
-# Find the total number of listings from the <h1> tag
-total_listings_tag = soup.find('h1')
+        # Navigate to the next page
+        next_page = soup.select_one('a[rel="next"]')
+        if next_page:
+            next_page_url = self.base_url + next_page['href']
+            next_soup = self.fetch_page(next_page_url)
+            data.extend(self.parse(next_soup))
 
-# Extract the number of listings from the tag text (e.g., "149 listings")
-if total_listings_tag:
-    total_listings = int(total_listings_tag.text.strip().split()[0])
-    print("Total Listings:", total_listings)
-else:
-    print("Total Listings not found.")
-    total_listings = 0
+        return data
 
-# Calculate the total number of pages (assuming 12 listings per page)
-listings_per_page = 12
-total_pages = math.ceil(total_listings / listings_per_page)
-print("Total Pages:", total_pages)
+    def parse_property(self, url):
+        soup = self.fetch_page(url)
+        name = soup.select_one('h1.product-title').get_text(strip=True)
+        price = soup.select_one('div.product-price__i--bold .price-val').get_text() + ' ' + soup.select_one('div.product-price__i--bold .price-cur').get_text()
+        address = soup.select_one('div.product-map__left__address').get_text(strip=True)
+        area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
+        property_type = soup.select('a.product-breadcrumbs__i-link')[1].get_text(strip=True)
+        transaction_type = soup.select_one('a.product-breadcrumbs__i-link').get_text()
+        
+        # Scrape latitude and longitude directly from the div
+        map_div = soup.select_one('div#item_map')
+        latitude = map_div['data-lat'] if map_div else None
+        longitude = map_div['data-lng'] if map_div else None
 
-# Function to dynamically find the pagination URL pattern
-def get_pagination_url_pattern(soup):
-    pagination_link = soup.find('a', {'aria-label': 'Next'})
-    if pagination_link and 'href' in pagination_link.attrs:
-        next_page_url = pagination_link['href']
-        print(f"Detected Pagination URL Pattern: {next_page_url}")
-        return next_page_url.replace('paginate=2', 'paginate={}')  # Adjust if necessary
-    else:
-        return None
+        property_data = {
+            'url': url,
+            'name': name,
+            'price': price,
+            'address': address,
+            'latitude': latitude,
+            'longitude': longitude,
+            'area': area,
+            'property_type': property_type,
+            'transaction_type': transaction_type,
+        }
+        print(property_data)
+        return property_data
 
-pagination_url_pattern = get_pagination_url_pattern(soup)
-if not pagination_url_pattern:
-    pagination_url_pattern = base_url + '?paginate={}'
 
-# Function to scrape property URLs from a single page
-def scrape_property_urls(page_num):
-    url = pagination_url_pattern.format(page_num)
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    property_urls = []
-    listings = soup.find_all('div', class_='listingimage')
-    
-    for listing in listings:
-        link = listing.find('a')
-        if link and 'href' in link.attrs:
-            property_url = link['href']
-            full_url = f"https://www.remax.sr{property_url}"
-            property_urls.append(full_url)
-    
-    return property_urls
+    def save_to_excel(self, data, url):
+        df = pd.DataFrame(data)
+        file_name = os.path.join(self.output_dir, re.sub(r'[^\w]', '_', url.replace('https://', '')) + '.xlsx')
+        df.to_excel(file_name, index=False, engine='openpyxl')
+        print(f'Saved data to {file_name}')
 
-# Function to scrape data from each property URL
-def scrape_property_data(property_url):
-    response = requests.get(property_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Extracting required data
-    name = soup.find('h2').text.strip() if soup.find('h2') else None
-    price = soup.find('p', class_='price').text.strip() if soup.find('p', class_='price') else None
-    
-    characteristics = {}
-    property_table = soup.find('div', id='propertytable')
+    def run(self):
+        for url in self.urls:
+            soup = self.fetch_page(url)
+            data = self.parse(soup)
+            self.save_to_excel(data, url)
 
-    if property_table:
-        rows = property_table.find_all('tr')
-        for row in rows:
-            cells = row.find_all('td')
-            for i in range(0, len(cells), 2):
-                if i + 1 < len(cells):  # Ensure there is a value cell
-                    key = cells[i].text.replace(":", "").strip()
-                    value = cells[i + 1].text.strip()
-                    if key and value:  # Add only if both key and value exist
-                        characteristics[key] = value
-
-    address = characteristics.get('Neighbourhood','')
-    if not address:
-        address = characteristics.get("District","")
-    area = characteristics.get("Living space", None)
-    
-    description = ''
-    paragraphs = soup.find_all('p')
-    if len(paragraphs) > 1:
-        description = paragraphs[2].text.strip()
-    else:
-        description = 'Description not found'
-    
-    breadcrumb = soup.find('ul', class_='breadcrumb')
-    property_type = breadcrumb.find_all('li')[1].text.strip() if breadcrumb else None
-    transaction_type = "sale" if breadcrumb and "sale" in breadcrumb.find_all('li')[1].text.lower() else None
-    
-    script_tag = soup.find('script', text=lambda t: t and 'google.maps.event.addDomListener' in t)
-    if script_tag:
-        lat_lng_text = script_tag.string.split('new google.maps.LatLng(')[1].split(')')[0]
-        latitude, longitude = lat_lng_text.split(', ')
-    else:
-        latitude, longitude = None, None
-    
-    return {
-        'URL': property_url,
-        "Name": name,
-        "Price": price,
-        "Address": address,
-        "Characteristics": characteristics,
-        "Area": area,
-        "Description": description,
-        "Property Type": property_type,
-        "Transaction Type": transaction_type,
-        "Latitude": latitude,
-        "Longitude": longitude
-    }
-
-# Scrape all pages and collect property URLs
-all_property_urls = []
-for page in range(1, total_pages + 1):
-    print(f"Scraping page {page}/{total_pages}...")
-    property_urls = scrape_property_urls(page)
-    all_property_urls.extend(property_urls)
-
-# Collect all property data
-all_properties_data = []
-for property_url in all_property_urls:
-    print(f"Scraping data from {property_url}...")
-    property_data = scrape_property_data(property_url)
-    print(property_data)
-    all_properties_data.append(property_data)
-
-# Save the data into an Excel file in the 'output' folder
-df = pd.DataFrame(all_properties_data)
-
-# Generate Excel filename based on the base URL and save in 'output' directory
-excel_filename = os.path.join(output_dir, base_url.replace('https://', '').replace('/', '_') + '.xlsx')
-df.to_excel(excel_filename, index=False)
-
-print(f"Data saved to {excel_filename}")
+if __name__ == "__main__":
+    urls = [
+        'https://bina.az/alqi-satqi/menziller?price_to=10000000',
+        # Add more URLs as needed
+    ]
+    scraper = BinaAzScraper(urls)
+    scraper.run()
