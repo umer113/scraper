@@ -1,151 +1,149 @@
 import requests
 from bs4 import BeautifulSoup
+import math
 import pandas as pd
 
-# Function to scrape property data from a given URL
+# URL of the page to scrape
+base_url = 'https://www.remax.sr/en/homes/homes-for-sale.html'
+
+# Send a GET request to fetch the HTML content of the first page
+response = requests.get(base_url)
+soup = BeautifulSoup(response.text, 'html.parser')
+
+# Find the total number of listings from the <h1> tag
+total_listings_tag = soup.find('h1')
+
+# Extract the number of listings from the tag text (e.g., "149 listings")
+if total_listings_tag:
+    total_listings = int(total_listings_tag.text.strip().split()[0])
+    print("Total Listings:", total_listings)
+else:
+    print("Total Listings not found.")
+    total_listings = 0
+
+# Calculate the total number of pages (assuming 12 listings per page)
+listings_per_page = 12
+total_pages = math.ceil(total_listings / listings_per_page)
+print("Total Pages:", total_pages)
+
+# Function to dynamically find the pagination URL pattern
+def get_pagination_url_pattern(soup):
+    pagination_link = soup.find('a', {'aria-label': 'Next'})
+    if pagination_link and 'href' in pagination_link.attrs:
+        next_page_url = pagination_link['href']
+        print(f"Detected Pagination URL Pattern: {next_page_url}")
+        return next_page_url.replace('paginate=2', 'paginate={}')
+    else:
+        return None
+
+pagination_url_pattern = get_pagination_url_pattern(soup)
+if not pagination_url_pattern:
+    pagination_url_pattern = base_url + '?paginate={}'
+
+# Function to scrape property URLs from a single page
+def scrape_property_urls(page_num):
+    url = pagination_url_pattern.format(page_num)
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    property_urls = []
+    listings = soup.find_all('div', class_='listingimage')
+    
+    for listing in listings:
+        link = listing.find('a')
+        if link and 'href' in link.attrs:
+            property_url = link['href']
+            full_url = f"https://www.remax.sr{property_url}"
+            property_urls.append(full_url)
+    
+    return property_urls
+
+# Function to scrape data from each property URL
 def scrape_property_data(property_url):
     response = requests.get(property_url)
     soup = BeautifulSoup(response.text, 'html.parser')
-
-    # Scrape name
-    name = soup.find('h1', class_='entry-title entry-prop').get_text(strip=True)
-
-    # Scrape address
-    address_div = soup.find('div', class_='property_categs')
-    address = address_div.get_text(strip=True) if address_div else 'N/A'
-
-    # Scrape price
-    price_div = soup.find('div', class_='price_area')
-    price = price_div.get_text(strip=True) if price_div else 'N/A'
-
-    # Scrape description
-    description_div = soup.find('div', id='tab_property_description')
-    description = description_div.get_text(strip=True) if description_div else 'N/A'
-
-    # Scrape area from characteristics
-    area = 'N/A'
-    characteristics_div = soup.find('div', id='tab_property_overview')
-    if characteristics_div:
-        overview_elements = characteristics_div.find_all('ul', class_='overview_element')
-        for overview in overview_elements:
-            if 'm²' or 'm2' in overview.get_text():
-                area = overview.get_text(strip=True)
-
-    # Scrape characteristics
+    
+    # Extracting required data
+    name = soup.find('h2').text.strip() if soup.find('h2') else None
+    price = soup.find('p', class_='price').text.strip() if soup.find('p', class_='price') else None
+    
     characteristics = {}
-    if characteristics_div:
-        overview_elements = characteristics_div.find_all('ul', class_='overview_element')
-        
-        for overview in overview_elements:
-            # Extract all 'li' elements inside each 'ul'
-            list_items = overview.find_all('li')
+    property_table = soup.find('div', id='propertytable')
 
-            # For each 'li' element, check if it's a key-value pair or just a single item
-            for i in range(0, len(list_items) - 1, 2):
-                key = list_items[i].get_text(strip=True)
-                value = list_items[i + 1].get_text(strip=True)
+    if property_table:
+        rows = property_table.find_all('tr')
+        for row in rows:
+            cells = row.find_all('td')
+            # Iterate through pairs of adjacent cells
+            for i in range(0, len(cells), 2):
+                if i + 1 < len(cells):  # Ensure there is a value cell
+                    key = cells[i].text.replace(":", "").strip()
+                    value = cells[i + 1].text.strip()
+                    if key and value:  # Add only if both key and value exist
+                        characteristics[key] = value
 
-                # If the value contains m², name the key "Area"
-                if 'm²' in value or 'm2' in value:
-                    key = 'Area'
+    address = characteristics.get('Neighbourhood','')
+    if address == '':
+        address = characteristics.get("District","")
+    area = characteristics.get("Living space", None)
+    description = ''
+    paragraphs = soup.find_all('p')
 
-                characteristics[key] = value
-
-            # Handle cases where 'li' does not have a colon (like "3 Bedrooms")
-            for li in overview.find_all('li'):
-                if li.find('svg'):  # Checking if it's an SVG (icon) next to the text
-                    key = li.get_text(strip=True)
-                    value = li.find_next_sibling('li').get_text(strip=True) if li.find_next_sibling('li') else 'N/A'
-                    
-                    # If the value contains m², name the key "Area"
-                    if 'm²' in value or 'm2' in value:
-                        key = 'Area'
-
-                    characteristics[key] = value
-
-
-
-
-    # Scrape property type
-    property_type_div = soup.find('div', class_='property_title_label actioncat')
-    property_type = property_type_div.get_text(strip=True) if property_type_div else 'N/A'
-
-    # Scrape transaction type
-    transaction_type_div = soup.find('div', class_='property_title_label')
-    transaction_type = transaction_type_div.get_text(strip=True) if transaction_type_div else 'N/A'
-
-    # Scrape latitude and longitude
-    latitude = longitude = 'N/A'
-    script_tag = soup.find('script', id='googlecode_property-js-extra')
+    # Check if there are at least two <p> elements
+    if len(paragraphs) > 1:
+        description = paragraphs[2].text.strip()
+    else:
+        description = 'Description not found'
+    
+    # Extract property type from breadcrumb
+    breadcrumb = soup.find('ul', class_='breadcrumb')
+    property_type = breadcrumb.find_all('li')[1].text.strip() if breadcrumb else None
+    
+    # Assuming transaction type is "sale" if found in the breadcrumb
+    transaction_type = "sale" if "sale" in breadcrumb.find_all('li')[1].text.lower() else None
+    
+    # Extract latitude and longitude from the script
+    script_tag = soup.find('script', text=lambda t: t and 'google.maps.event.addDomListener' in t)
     if script_tag:
-        script_content = script_tag.string
-        if 'general_latitude' in script_content and 'general_longitude' in script_content:
-            latitude = script_content.split('"general_latitude":"')[1].split('"')[0]
-            longitude = script_content.split('"general_longitude":"')[1].split('"')[0]
-
-    # Return all the scraped data
+        lat_lng_text = script_tag.string.split('new google.maps.LatLng(')[1].split(')')[0]
+        latitude, longitude = lat_lng_text.split(', ')
+    else:
+        latitude, longitude = None, None
+    
     return {
-        'Name': name,
-        'Address': address,
-        'Price': price,
-        'Description': description,
-        'Area': area,
-        'Characteristics': characteristics,
-        'Property Type': property_type,
-        'Transaction Type': transaction_type,
-        'Latitude': latitude,
-        'Longitude': longitude,
-        'URL': property_url
+        'URL' :property_url,
+        "Name": name,
+        "Price": price,
+        "Address": address,
+        "Characteristics": characteristics,
+        "Area": area,
+        "Description": description,
+        "Property Type": property_type,
+        "Transaction Type": transaction_type,
+        "Latitude": latitude,
+        "Longitude": longitude
     }
 
-# Function to scrape all property URLs and their data
-def scrape_all_properties(base_url, start_page=1):
-    page_number = start_page
-    property_urls = []
+# Scrape all pages and collect property URLs
+all_property_urls = []
+for page in range(1, total_pages + 1):
+    print(f"Scraping page {page}/{total_pages}...")
+    property_urls = scrape_property_urls(page)
+    all_property_urls.extend(property_urls)
 
-    while True:
-        url = f"{base_url}{page_number}/"
-        response = requests.get(url)
-
-        if response.status_code != 200:
-            print(f"Failed to retrieve page {page_number}. Stopping.")
-            break
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        property_divs = soup.find_all('div', class_='listing-unit-img-wrapper')
-
-        if not property_divs:
-            print(f"No property URLs found on page {page_number}. Stopping.")
-            break
-
-        for div in property_divs:
-            anchor_tag = div.find('a')
-            if anchor_tag and 'href' in anchor_tag.attrs:
-                property_urls.append(anchor_tag['href'])
-
-        print(f"Scraped {len(property_divs)} properties from page {page_number}.")
-        page_number += 1
-
-    return property_urls
-
-# Base URL for pagination
-base_url = 'https://www.samoarealty.co/property_action_category/sales/page/'
-
-# Scrape all property URLs
-property_urls = scrape_all_properties(base_url)
-
-# Initialize an empty list to hold all property data
+# Collect all property data
 all_properties_data = []
-
-# Visit each property URL and scrape the data
-for property_url in property_urls:
+for property_url in all_property_urls:
+    print(f"Scraping data from {property_url}...")
     property_data = scrape_property_data(property_url)
     print(property_data)
     all_properties_data.append(property_data)
 
-# Convert the data to a DataFrame
+# Save the data into an Excel file
 df = pd.DataFrame(all_properties_data)
 
-# Save the data to a single Excel file
-df.to_excel('samoarealty_properties.xlsx', index=False)
-print("All property data saved to 'samoarealty_properties.xlsx'")
+# Generate Excel filename based on the base URL
+excel_filename = base_url.replace('https://', '').replace('/', '_') + '.xlsx'
+df.to_excel(excel_filename, index=False)
+
+print(f"Data saved to {excel_filename}")
