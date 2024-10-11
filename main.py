@@ -1,7 +1,13 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 import math
 import pandas as pd
+
+# Create the output directory if it doesn't exist
+output_dir = 'output'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
 # URL of the page to scrape
 base_url = 'https://www.remax.sr/en/homes/homes-for-sale.html'
@@ -32,7 +38,7 @@ def get_pagination_url_pattern(soup):
     if pagination_link and 'href' in pagination_link.attrs:
         next_page_url = pagination_link['href']
         print(f"Detected Pagination URL Pattern: {next_page_url}")
-        return next_page_url.replace('paginate=2', 'paginate={}')
+        return next_page_url.replace('paginate=2', 'paginate={}')  # Adjust if necessary
     else:
         return None
 
@@ -74,7 +80,6 @@ def scrape_property_data(property_url):
         rows = property_table.find_all('tr')
         for row in rows:
             cells = row.find_all('td')
-            # Iterate through pairs of adjacent cells
             for i in range(0, len(cells), 2):
                 if i + 1 < len(cells):  # Ensure there is a value cell
                     key = cells[i].text.replace(":", "").strip()
@@ -83,26 +88,21 @@ def scrape_property_data(property_url):
                         characteristics[key] = value
 
     address = characteristics.get('Neighbourhood','')
-    if address == '':
+    if not address:
         address = characteristics.get("District","")
     area = characteristics.get("Living space", None)
+    
     description = ''
     paragraphs = soup.find_all('p')
-
-    # Check if there are at least two <p> elements
     if len(paragraphs) > 1:
         description = paragraphs[2].text.strip()
     else:
         description = 'Description not found'
     
-    # Extract property type from breadcrumb
     breadcrumb = soup.find('ul', class_='breadcrumb')
     property_type = breadcrumb.find_all('li')[1].text.strip() if breadcrumb else None
+    transaction_type = "sale" if breadcrumb and "sale" in breadcrumb.find_all('li')[1].text.lower() else None
     
-    # Assuming transaction type is "sale" if found in the breadcrumb
-    transaction_type = "sale" if "sale" in breadcrumb.find_all('li')[1].text.lower() else None
-    
-    # Extract latitude and longitude from the script
     script_tag = soup.find('script', text=lambda t: t and 'google.maps.event.addDomListener' in t)
     if script_tag:
         lat_lng_text = script_tag.string.split('new google.maps.LatLng(')[1].split(')')[0]
@@ -111,7 +111,7 @@ def scrape_property_data(property_url):
         latitude, longitude = None, None
     
     return {
-        'URL' :property_url,
+        'URL': property_url,
         "Name": name,
         "Price": price,
         "Address": address,
@@ -139,11 +139,11 @@ for property_url in all_property_urls:
     print(property_data)
     all_properties_data.append(property_data)
 
-# Save the data into an Excel file
+# Save the data into an Excel file in the 'output' folder
 df = pd.DataFrame(all_properties_data)
 
-# Generate Excel filename based on the base URL
-excel_filename = base_url.replace('https://', '').replace('/', '_') + '.xlsx'
+# Generate Excel filename based on the base URL and save in 'output' directory
+excel_filename = os.path.join(output_dir, base_url.replace('https://', '').replace('/', '_') + '.xlsx')
 df.to_excel(excel_filename, index=False)
 
 print(f"Data saved to {excel_filename}")
