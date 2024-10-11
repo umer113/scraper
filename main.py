@@ -48,9 +48,23 @@ class BinaAzScraper:
         transaction_type = soup.select_one('a.product-breadcrumbs__i-link').get_text()
         
         # Scrape latitude and longitude directly from the div
+        description_div = soup.select_one('div.product-description__content')
+        if description_div:
+            description = description_div.get_text(separator='\n', strip=True)  # Extract all text, handling <br> as new lines
+        else:
+            description = None
+        
+        # Scrape latitude and longitude directly from the div
         map_div = soup.select_one('div#item_map')
         latitude = map_div['data-lat'] if map_div else None
         longitude = map_div['data-lng'] if map_div else None
+
+        characteristics = {}
+        characteristics_divs = soup.select('div.product-properties__column .product-properties__i')
+        for div in characteristics_divs:
+            label = div.select_one('label.product-properties__i-name').get_text(strip=True)
+            value = div.select_one('span.product-properties__i-value').get_text(strip=True)
+            characteristics[label] = value
 
         property_data = {
             'url': url,
