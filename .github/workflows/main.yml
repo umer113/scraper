@@ -1,12 +1,7 @@
 name: Run Web Scraper
 
 on:
-  workflow_dispatch:  # Manual trigger
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: '0 0 * * *'  # Optional: runs daily at midnight
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -27,5 +22,10 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run web scraper
-      run: |
-        python main.py
+      run: python main.py
+
+    - name: Upload all Excel files
+      uses: actions/upload-artifact@v2
+      with:
+        name: scraped-data
+        path: output/*.xlsx
