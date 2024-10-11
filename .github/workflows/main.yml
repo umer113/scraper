@@ -9,7 +9,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3  # Updated to v3
 
     - name: Set up Python 3.12
       uses: actions/setup-python@v2
@@ -24,9 +24,8 @@ jobs:
     - name: Run web scraper
       run: python main.py
 
-    # Update to the latest version (v3) of upload-artifact action
     - name: Upload Excel file
-      uses: actions/upload-artifact@v3  # Updated from v2 to v3
+      uses: actions/upload-artifact@v3  # Updated to v3
       with:
         name: scraped-data
         path: output/*.xlsx
