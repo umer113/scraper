@@ -16,14 +16,25 @@ if not os.path.exists(output_dir):
 
 def get_lat_lon(address):
     geolocator = Nominatim(user_agent="my_geocoder_app")
+    
     try:
         location = geolocator.geocode(address)
         if location:
+            print(f"Geocoded {address}: (Lat: {location.latitude}, Lon: {location.longitude})")
             return location.latitude, location.longitude
         else:
+            print(f"Geocoding failed for {address}")
             return None, None
+    except GeocoderTimedOut:
+        # Retry once in case of a timeout
+        time.sleep(2)
+        return get_lat_lon(address)  # Recursion to retry once
     except Exception as e:
+        print(f"Error geocoding {address}: {e}")
         return None, None
+    finally:
+        # Delay to avoid hitting rate limits
+        time.sleep(1) 
 
 def get_property_urls(base_url):
     property_urls = []
