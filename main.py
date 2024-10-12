@@ -1,103 +1,164 @@
 import os
 import requests
 from bs4 import BeautifulSoup
+import json
 import pandas as pd
-import re
+from geopy.geocoders import Nominatim
 
-class BinaAzScraper:
-    def __init__(self, urls):
-        self.base_url = 'https://bina.az'
-        self.urls = urls
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-        }
-        # Create the output directory if it doesn't exist
-        self.output_dir = 'output'
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.3'
+}
 
-    def fetch_page(self, url):
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, 'html.parser')
+# Create an output directory to store the Excel files
+output_dir = 'output'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
-    def parse(self, soup):
-        data = []
-        # Extract property URLs
-        property_urls = [a['href'] for a in soup.select('a.item_link')]
-        for url in property_urls:
-            full_url = self.base_url + url
-            data.append(self.parse_property(full_url))
-
-        # Navigate to the next page
-        next_page = soup.select_one('a[rel="next"]')
-        if next_page:
-            next_page_url = self.base_url + next_page['href']
-            next_soup = self.fetch_page(next_page_url)
-            data.extend(self.parse(next_soup))
-
-        return data
-
-    def parse_property(self, url):
-        soup = self.fetch_page(url)
-        name = soup.select_one('h1.product-title').get_text(strip=True)
-        price = soup.select_one('div.product-price__i--bold .price-val').get_text() + ' ' + soup.select_one('div.product-price__i--bold .price-cur').get_text()
-        address = soup.select_one('div.product-map__left__address').get_text(strip=True)
-        area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
-        property_type = soup.select('a.product-breadcrumbs__i-link')[1].get_text(strip=True)
-        transaction_type = soup.select_one('a.product-breadcrumbs__i-link').get_text()
-        
-        # Scrape latitude and longitude directly from the div
-        description_div = soup.select_one('div.product-description__content')
-        if description_div:
-            description = description_div.get_text(separator='\n', strip=True)  # Extract all text, handling <br> as new lines
+def get_lat_lon(address):
+    geolocator = Nominatim(user_agent="my_geocoder_app")
+    try:
+        location = geolocator.geocode(address)
+        if location:
+            return location.latitude, location.longitude
         else:
-            description = None
-        
-        # Scrape latitude and longitude directly from the div
-        map_div = soup.select_one('div#item_map')
-        latitude = map_div['data-lat'] if map_div else None
-        longitude = map_div['data-lng'] if map_div else None
+            return None, None
+    except Exception as e:
+        return None, None
 
+def get_property_urls(base_url):
+    property_urls = []
+    page = 1
+
+    while True:
+        print(f"Scraping page {page} for {base_url}")
+
+        if '?' in base_url:
+            current_url = f"{base_url}&page={page}"
+        else:
+            current_url = f"{base_url}?page={page}"
+
+        response = requests.get(current_url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"Failed to retrieve page {page} from {current_url}, status code: {response.status_code}")
+            break
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        page_property_urls = ['https://ci.coinafrique.com' + link.get('href') for link in soup.find_all('a', class_='card-image ad__card-image waves-block waves-light')]
+
+        if not page_property_urls:
+            print(f"No more property URLs found on page {page}. Stopping.")
+            break
+
+        property_urls.extend(page_property_urls)
+        print(f"Collected {len(page_property_urls)} property URLs from page {page}")
+
+        page += 1
+
+    print(f"Total property URLs collected: {len(property_urls)}")
+    return property_urls
+
+def scrape_property_data(url):
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        print(f"Failed to retrieve property data from {url}, status code: {response.status_code}")
+        return None
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    try:
+        name = soup.find('meta', attrs={'name': 'title'})['content'].strip()
+    except AttributeError:
+        name = None
+
+    try:
+        description_div = soup.find('div', class_='ad__info__box ad__info__box-descriptions')
+        description = description_div.find_all('p')[1].text.strip()
+    except (AttributeError, IndexError):
+        description = None
+
+    try:
+        address_tag = soup.find('span', class_='valign-wrapper', attrs={'data-address': True})
+        address = address_tag['data-address'].strip() if address_tag else None
+    except AttributeError:
+        address = None
+
+    latitude, longitude = None, None
+    if address:
+        latitude, longitude = get_lat_lon(address)
+
+    try:
+        price = soup.find('p', class_='price').text.strip()
+    except AttributeError:
+        price = None
+
+    try:
         characteristics = {}
-        characteristics_divs = soup.select('div.product-properties__column .product-properties__i')
-        for div in characteristics_divs:
-            label = div.select_one('label.product-properties__i-name').get_text(strip=True)
-            value = div.select_one('span.product-properties__i-value').get_text(strip=True)
+        characteristic_items = soup.select('.details-characteristics ul li')
+        for item in characteristic_items:
+            label = item.find_all('span')[0].text.strip()
+            value = item.find_all('span', class_='qt')[0].text.strip()
             characteristics[label] = value
+    except AttributeError:
+        characteristics = None
 
-        property_data = {
-            'url': url,
-            'name': name,
-            'price': price,
-            'address': address,
-            'description':description,
-            'latitude': latitude,
-            'longitude': longitude,
-            'area': area,
-            'property_type': property_type,
-            'transaction_type': transaction_type,
-        }
-        print(property_data)
-        return property_data
+    try:
+        area = next((value for key, value in characteristics.items() if 'Superficie' in key), None)
+    except AttributeError:
+        area = None
 
+    try:
+        ad_details = soup.find('div', id='ad-details')
+        ad_data = json.loads(ad_details['data-ad'])
+        property_type = ad_data['category']['name']
+    except (AttributeError, KeyError, json.JSONDecodeError):
+        property_type = None
 
-    def save_to_excel(self, data, url):
-        df = pd.DataFrame(data)
-        file_name = os.path.join(self.output_dir, re.sub(r'[^\w]', '_', url.replace('https://', '')) + '.xlsx')
-        df.to_excel(file_name, index=False, engine='openpyxl')
-        print(f'Saved data to {file_name}')
+    try:
+        if "location" in name.lower():
+            transaction_type = "rent"
+        else:
+            transaction_type = "buy"
+    except AttributeError:
+        transaction_type = None
 
-    def run(self):
-        for url in self.urls:
-            soup = self.fetch_page(url)
-            data = self.parse(soup)
-            self.save_to_excel(data, url)
+    property_data = {
+        'name': name,
+        'address': address,
+        'price': price,
+        'area': area,
+        'description': description,
+        'latitude': latitude,
+        'longitude': longitude,
+        'property_type': property_type,
+        'transaction_type': transaction_type,
+        'property_url': url,
+        'characteristics': characteristics
+    }
 
-if __name__ == "__main__":
-    urls = [
-        'https://bina.az/alqi-satqi/menziller?price_to=10000000',
-        # Add more URLs as needed
-    ]
-    scraper = BinaAzScraper(urls)
-    scraper.run()
+    print(property_data)
+
+    return property_data
+
+def scrape_multiple_urls(urls):
+    for base_url in urls:
+        property_urls = get_property_urls(base_url)
+
+        properties_data = []
+        for index, property_url in enumerate(property_urls):
+            print(f"Scraping property {index + 1} of {len(property_urls)} from {base_url}")
+            data = scrape_property_data(property_url)
+            if data:
+                properties_data.append(data)
+
+        df = pd.DataFrame(properties_data)
+        excel_file_name = os.path.join(output_dir, f"{base_url.replace('https://', '').replace('/', '_').replace('?', '_').replace('&', '_').replace('=', '_')}.xlsx")
+        df.to_excel(excel_file_name, index=False, sheet_name='Properties')
+
+        print(f"Data from {base_url} saved to {excel_file_name}")
+
+urls = [
+    "https://ci.coinafrique.com/search?sort_by=last&category=14&price_min=10000&price_max=150000&is_pro=1"
+]
+
+scrape_multiple_urls(urls)
