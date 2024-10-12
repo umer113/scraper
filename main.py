@@ -6,10 +6,15 @@ import pandas as pd
 import time
 import logging
 import re
+import os
 
 # Configure logging
 logging.basicConfig(filename='scraper.log', level=logging.ERROR, 
                     format='%(asctime)s %(levelname)s %(message)s')
+
+# Ensure output directory exists
+if not os.path.exists('output'):
+    os.makedirs('output')
 
 # Function to fetch and parse a webpage with retry logic
 def fetch_page(url, retries=3):
@@ -87,8 +92,6 @@ def extract_lat_long(url):
         logging.error(f"Error in extract_lat_long for URL: {url}: {str(e)}")
         return '-', '-'
 
-
-
 # Function to extract property details
 def extract_property_details(soup, transaction_type, property_url):
     details = {}
@@ -119,9 +122,8 @@ def extract_property_details(soup, transaction_type, property_url):
     
     # Add characteristics to details
     details['characteristics'] = characteristics
-    print(details['characteristics'])
 
-    # area
+    # Extract area
     area_element = soup.find('div', {'class': 'props-name'}, text='Floor Area')
     if area_element:
         details['area'] = area_element.find_next('div', {'class': 'props-value'}).text.strip()
@@ -201,5 +203,7 @@ for base_url in base_urls:
     # Save to an Excel file using the sanitized URL as filename
     df = pd.DataFrame(property_details_list)
     sanitized_filename = sanitize_url_for_filename(base_url) + ".xlsx"
-    df.to_excel(sanitized_filename, index=False)
-    print(f"Data saved to {sanitized_filename}")
+    output_path = os.path.join("output", sanitized_filename)
+    df.to_excel(output_path, index=False)
+    print(f"Data saved to {output_path}")
+
