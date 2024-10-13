@@ -141,7 +141,7 @@ def scrape_properties(base_urls):
 if __name__ == "__main__":
     # Modify to accept multiple base URLs
     base_urls = [
-        "https://www.property.com.fj/rent/?listing_type=lease&property_type=rental&order_by=relevance&rent__gte=500&bedrooms__gte=1&bathrooms__gte=4&is_certified=1&private_seller=1"
+        "https://www.property.com.fj/rent/?listing_type=lease&property_type=rental&order_by=relevance&is_certified=1&private_seller=1"
     ]
     domain = "https://www.property.com.fj/"
     scrape_properties(base_urls)
