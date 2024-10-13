@@ -24,6 +24,9 @@ jobs:
     - name: Run web scraper
       run: python main.py
 
+    - name: List files in output directory  # Debug step to check if the file exists
+      run: ls -al output/
+
     - name: Upload Excel file
       uses: actions/upload-artifact@v3  # Updated to v3
       with:
