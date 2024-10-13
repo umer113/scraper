@@ -77,7 +77,13 @@ def clean_filename(base_url):
 
 def save_to_excel(data, filename):
     df = pd.DataFrame(data)
-    df.to_excel(filename, index=False)
+    # Ensure output directory exists
+    output_dir = "output"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    # Save the file inside the output directory
+    filepath = os.path.join(output_dir, filename)
+    df.to_excel(filepath, index=False)
 
 # Function to extract property URLs from a page
 def extract_property_urls(soup):
