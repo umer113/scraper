@@ -1,3 +1,4 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 import math
@@ -66,8 +67,6 @@ def extract_property_data(property_url):
         'URL': property_url
     }
 
-    print(details)
-    
     return details
 
 def clean_filename(base_url):
@@ -77,13 +76,14 @@ def clean_filename(base_url):
 
 def save_to_excel(data, filename):
     df = pd.DataFrame(data)
-    # Ensure output directory exists
+    # Ensure 'output' directory exists
     output_dir = "output"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    # Save the file inside the output directory
+    # Save the file inside 'output' directory
     filepath = os.path.join(output_dir, filename)
     df.to_excel(filepath, index=False)
+    print(f"File saved at: {filepath}")
 
 # Function to extract property URLs from a page
 def extract_property_urls(soup):
@@ -138,7 +138,6 @@ def scrape_properties(base_urls):
         all_property_data = []
         for property_url in all_property_urls:
             property_data = extract_property_data(property_url)
-            print(property_data)
             all_property_data.append(property_data)
 
         file_name = clean_filename(base_url) + ".xlsx"
@@ -146,9 +145,13 @@ def scrape_properties(base_urls):
         print(f"Data for properties from {base_url} saved to {file_name}")
 
 if __name__ == "__main__":
-    # Modify to accept multiple base URLs
-    base_urls = [
-        "https://www.property.com.fj/rent/?listing_type=lease&property_type=rental&order_by=relevance&is_certified=1&private_seller=1"
-    ]
-    domain = "https://www.property.com.fj/"
-    scrape_properties(base_urls)
+    try:
+        # Modify to accept multiple base URLs
+        base_urls = [
+            "https://www.property.com.fj/rent/?listing_type=lease&property_type=rental&order_by=relevance&rent__gte=500&bedrooms__gte=1&bathrooms__gte=4&is_certified=1&private_seller=1"
+        ]
+        domain = "https://www.property.com.fj/"
+        scrape_properties(base_urls)
+        print("Scraping completed successfully.")
+    except Exception as e:
+        print(f"Error during scraping: {e}")
