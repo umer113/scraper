@@ -138,6 +138,7 @@ def scrape_properties(base_urls):
         all_property_data = []
         for property_url in all_property_urls:
             property_data = extract_property_data(property_url)
+            print(property_data)
             all_property_data.append(property_data)
 
         file_name = clean_filename(base_url) + ".xlsx"
