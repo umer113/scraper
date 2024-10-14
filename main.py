@@ -1,157 +1,192 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-import math
-import re
+import json
 import pandas as pd
-from geopy.geocoders import Nominatim
-from openpyxl import Workbook
+import re
+import math
 
-def extract_property_data(property_url):
-    details = {}
-    response = requests.get(property_url)
-    response.raise_for_status()
+# Function to scrape property details from a property URL
+def scrape_property_details(property_url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+    }
+    response = requests.get(property_url, headers=headers)
     soup = BeautifulSoup(response.content, 'html.parser')
     
-    # Extract property name
-    name_tag = soup.find('meta', attrs={'name': 'twitter:title'})
-    name = name_tag['content'] if name_tag else None
-    
-    # Extract address
-    address_tag = soup.find('h1', class_='property-address')
-    address = address_tag.text.strip() if address_tag else None
-    
-    # Extract price
-    price_tag = soup.find('h2', class_='property-price')
-    price = price_tag.text.strip() if price_tag else None
-    
-    # Extract description
-    description_tag = soup.find('div', class_='description listing-read-more')
-    description = description_tag.text.strip() if description_tag else None
-    
-    # Extract characteristics
-    characteristics = {}
-    details_section = soup.find('div', class_='details row')
-    if details_section:
-        for li in details_section.find_all('li'):
-            try:
-                key, value = li.text.split(':')
-                characteristics[key.strip()] = value.strip()
-            except ValueError:
-                continue
-    
-    # Extract property type
-    property_type = characteristics.get('Property Type', None)
-    area = characteristics.get("Land Area",None)
-    
-    # Determine transaction type from URL
-    transaction_type = 'sale' if 'sale' in property_url else 'rent'
-    
-    # Get latitude and longitude using geopy
-    geolocator = Nominatim(user_agent="property_scraper")
-    location = geolocator.geocode(address) if address else None
-    latitude = location.latitude if location else None
-    longitude = location.longitude if location else None
+    property_data = {}
+    property_data['URL'] = property_url
 
-    details = {
-        'Name': name,
-        'Address': address,
-        'Price': price,
-        'Area': area,
-        'Description': description,
-        'Property Type': property_type,
-        'Transaction Type': transaction_type,
-        'Characteristics': characteristics,
-        'Latitude': latitude,
-        'Longitude': longitude,
-        'URL': property_url
+    # Scraping the property name from <meta property="og:title">
+    title_meta = soup.find('meta', property="og:title")
+    if title_meta:
+        property_data['Name'] = title_meta['content']
+
+    # Scraping the address
+    address_div = soup.find('div', class_='e4fd45f0')
+    if address_div:
+        property_data['Address'] = address_div.text.strip()
+    else:
+        property_data['Address'] = None
+    
+    # Scraping the price
+    price_span = soup.find('span', {'aria-label': 'Price'})
+    price = price_span.text if price_span else None
+    property_data['Price'] = price
+
+    # Scraping the description
+    description_span = soup.find('span', class_='_3547dac9')
+    if description_span:
+        property_data['Description'] = description_span.text.strip()
+    else:
+        property_data['Description'] = None
+
+    # Scraping property characteristics (stored as key-value pairs)
+    property_info = soup.find('ul', class_='_3dc8d08d')
+    if property_info:
+        info_items = property_info.find_all('li')
+        characteristics = {}
+        for item in info_items:
+            label = item.find('span', class_='ed0db22a').text.strip()
+            value = item.find('span', class_='_2fdf7fc5').text.strip()
+            characteristics[label] = value
+        property_data['Characteristics'] = characteristics
+
+
+    property_info = soup.find('ul', class_='_3dc8d08d')
+    if property_info:
+        info_items = property_info.find_all('li')
+        for item in info_items:
+            label = item.find('span', class_='ed0db22a').text.strip()
+            value = item.find('span', class_='_2fdf7fc5').text.strip()
+            if label == "Type":
+                property_data['Property Type'] = value
+            elif label == "Purpose":
+                property_data['Transaction Type'] = value
+
+    try:
+        details_div = soup.find('div', class_='_14f36d85')
+        if details_div:
+            details_spans = details_div.find_all('span', class_='_783ab618')
+            for detail in details_spans:
+                label = detail['aria-label']
+                value = detail.find('span', class_='_140e6903').text.strip()
+                if label == 'Beds':
+                    property_data['Beds'] = value
+                elif label == 'Baths':
+                    property_data['Baths'] = value
+                elif label == 'Area':
+                    property_data['Area'] = value
+    except Exception as e:
+        print(f"Error scraping Beds, Baths, and Area: {e}")
+
+
+    # Scraping latitude and longitude from the second JSON-LD script tag
+    script_tags = soup.find_all('script', type="application/ld+json")
+    if len(script_tags) >= 2:  # Check if there are at least two script tags
+        second_script_tag = script_tags[1]  # Index 1 for the second tag
+        try:
+            json_data = json.loads(second_script_tag.string)
+            geo = json_data.get('geo', {})
+            property_data['Latitude'] = geo.get('latitude')
+            property_data['Longitude'] = geo.get('longitude')
+        except json.JSONDecodeError:
+            print("Error parsing JSON data from the second script tag")
+    else:
+        print("Not enough JSON-LD script tags found")
+
+    return property_data
+
+# Function to scrape total listings and property URLs from a single page
+def scrape_page(url):
+    base_url = "https://www.bayut.jo"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     }
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    property_urls = set()
 
-    return details
+    property_links = soup.find_all('a', class_='d40f2294')
+    for link in property_links:
+        full_url = base_url + link['href']
+        property_urls.add(full_url)
+    
+    summary_span = soup.find('span', class_=re.compile(r'_71ab91b9'))
+    total_listings = None
+    if summary_span:
+        summary_text = summary_span.text.strip()
+        match = re.search(r'of\s+([\d,]+)', summary_text)
+        if match:
+            total_listings = int(match.group(1).replace(',', ''))
 
-def clean_filename(base_url):
-    # Replace invalid characters with underscores
-    valid_filename = re.sub(r'[\/:*?"<>|]', '_', base_url)
-    return valid_filename
+    return property_urls, total_listings
 
-def save_to_excel(data, filename):
-    df = pd.DataFrame(data)
-    # Ensure 'output' directory exists
+# Function to generate pagination URLs by inserting 'page-{number}' after the 6th '/'
+def generate_pagination_urls(base_url, total_pages):
+    url_parts = base_url.split('/')
+    urls = [base_url]  # First page URL
+    
+    for page in range(2, total_pages + 1):
+        # Insert 'page-{page}' after the 6th '/' and rejoin the URL
+        pagination_url = '/'.join(url_parts[:6]) + f'/page-{page}/' + '/'.join(url_parts[6:])
+        urls.append(pagination_url)
+    
+    return urls
+
+# Main function to scrape multiple pages
+def main(urls):
     output_dir = "output"
+    
+    # Ensure the output directory exists
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    # Save the file inside 'output' directory
-    filepath = os.path.join(output_dir, filename)
-    df.to_excel(filepath, index=False)
-    print(f"File saved at: {filepath}")
 
-# Function to extract property URLs from a page
-def extract_property_urls(soup):
-    property_urls = []
-    listings = soup.find_all('div', class_='listing-card residential None')
-    for listing in listings:
-        a_tag = listing.find('a')
-        if a_tag and 'href' in a_tag.attrs:
-            property_url = domain + a_tag['href']
-            property_urls.append(property_url)
-    return property_urls
+    for url in urls:
+        count = 1
+        all_properties = []
+        print(f"Scraping property URLs from: {url}")
+        
+        property_urls, total_listings = scrape_page(url)
+        if total_listings is None:
+            print("Could not determine total listings.")
+            continue
 
-# Scraping logic in a function
-def scrape_properties(base_urls):
-    for base_url in base_urls:
-        # Send a GET request to the first page to find the total number of properties
-        response = requests.get(base_url + "1")
-        response.raise_for_status()  # Check that the request was successful
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # Find the specific div containing the text to extract the number of properties
-        search_result = soup.find('div', class_='search-result-description')
-
-        if search_result:
-            match = re.search(r'Found (\d+) (Residential|Rental)', search_result.text)
-            if match:
-                number_of_properties = int(match.group(1))  # Convert to integer
-                property_type = match.group(2)  # Capture the property type (Residential or Rental)
-                print(f"Number of {property_type} Properties: {number_of_properties}")
-            else:
-                print("Number not found in the text.")
-        else:
-            print("Search result description not found on the page.")
-
-        # Calculate total pages
-        properties_per_page = 10
-        total_pages = math.ceil(number_of_properties / properties_per_page)  # Division and ceiling
+        print(f"Total listings found: {total_listings}")
+        
+        # Calculate total number of pages (24 listings per page)
+        total_pages = math.ceil(total_listings / 24)
         print(f"Total pages: {total_pages}")
+        
+        # Generate pagination URLs
+        pagination_urls = generate_pagination_urls(url, total_pages)
+        
+        for page_url in pagination_urls:
+            print(f"Scraping page: {page_url}")
+            page_property_urls, _ = scrape_page(page_url)
+            property_urls.update(page_property_urls)
+        
+        print(f"Total property URLs collected: {len(property_urls)}")
 
-        all_property_urls = []
-        # Iterate through each page and scrape the property URLs
-        for page in range(1, total_pages + 1):
-            page_url = f"{base_url}#page-{page}"
-            response = requests.get(page_url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            property_urls = extract_property_urls(soup)
-            all_property_urls.extend(property_urls)
-            print(f"Page {page}")
+        for property_url in property_urls:
+            print(f"Scraping details from property: {property_url}")
+            property_details = scrape_property_details(property_url)
+            print(property_details)
+            all_properties.append(property_details)
+            print(count)
+            count+=1
+        
+        if all_properties:
+            sanitized_filename = re.sub(r'[\\/*?:"<>|]', "_", url.replace('https://', '').replace('/', '_'))
+            filename = f"{output_dir}/{sanitized_filename}.xlsx"
+            df = pd.DataFrame(all_properties)
+            df.to_excel(filename, index=False)
+            print(f"Saved all data to {filename}")
 
-        # Extract details from each property URL and save them to Excel files
-        all_property_data = []
-        for property_url in all_property_urls:
-            property_data = extract_property_data(property_url)
-            all_property_data.append(property_data)
+# Example of usage with multiple URLs
+urls = [
+ "https://www.bayut.jo/en/jordan/apartments-for-rent/"
+]
 
-        file_name = clean_filename(base_url) + ".xlsx"
-        save_to_excel(all_property_data, file_name)
-        print(f"Data for properties from {base_url} saved to {file_name}")
-
-if __name__ == "__main__":
-    try:
-        # Modify to accept multiple base URLs
-        base_urls = [
-            "https://www.property.com.fj/rent/?listing_type=lease&property_type=rental&order_by=relevance&rent__gte=500&bedrooms__gte=1&bathrooms__gte=4&is_certified=1&private_seller=1"
-        ]
-        domain = "https://www.property.com.fj/"
-        scrape_properties(base_urls)
-        print("Scraping completed successfully.")
-    except Exception as e:
-        print(f"Error during scraping: {e}")
+main(urls)
