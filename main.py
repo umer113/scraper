@@ -7,6 +7,7 @@ import pandas as pd
 class BinaAzScraper:
     def __init__(self, base_url, start_page, end_page):
         self.base_url = base_url
+        self.main_url = "https://bina.az/"
         self.start_page = start_page
         self.end_page = end_page
         self.headers = {
@@ -40,7 +41,7 @@ class BinaAzScraper:
         # Extract property URLs
         property_urls = [a['href'] for a in soup.select('a.item_link')]
         for url in property_urls:
-            full_url = self.base_url + url
+            full_url = self.main_url + url
             property_data = self.parse_property(full_url)
             if property_data:
                 data.append(property_data)
@@ -89,7 +90,6 @@ class BinaAzScraper:
                 'property_type': property_type,   # Statically defined
                 'transaction_type': transaction_type,   # Statically defined
             }
-            print(property_data)
             return property_data
         except Exception as e:
             print(f"Error parsing property data from {url}: {e}")
