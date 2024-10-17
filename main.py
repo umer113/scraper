@@ -13,6 +13,7 @@ class BinaAzScraper:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
+        self.all_data = []  # List to accumulate all data
 
     def fetch_page(self, url, retries=3, delay=5):
         for attempt in range(retries):
@@ -95,14 +96,14 @@ class BinaAzScraper:
             print(f"Error parsing property data from {url}: {e}")
             return None
 
-    def save_to_excel(self, data, page_num):
+    def save_to_excel(self, data):
         # Create output directory if it doesn't exist
         os.makedirs('output', exist_ok=True)
 
         df = pd.DataFrame(data)
-        file_name = f'output/bina_az_page_{page_num}.xlsx'
+        file_name = 'output/bina_az_all_pages.xlsx'
         df.to_excel(file_name, index=False, engine='openpyxl')
-        print(f'Saved data for page {page_num} to {file_name}')
+        print(f'Saved all data to {file_name}')
 
     def run(self):
         for page_num in range(self.start_page, self.end_page + 1):
@@ -112,7 +113,11 @@ class BinaAzScraper:
             if soup is not None:
                 data = self.parse(soup)
                 if data:
-                    self.save_to_excel(data, page_num)
+                    self.all_data.extend(data)  # Accumulate data from each page
+
+        # Save all accumulated data at once after scraping all pages
+        if self.all_data:
+            self.save_to_excel(self.all_data)
 
 if __name__ == "__main__":
     base_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
