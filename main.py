@@ -59,7 +59,7 @@ class BinaAzScraper:
             area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
 
             # Static property type and transaction type
-            property_type = "house"
+            property_type = "Newly built apartments"
             transaction_type = "rent"
 
             description_div = soup.select_one('div.product-description__content')
@@ -115,8 +115,8 @@ class BinaAzScraper:
                     self.save_to_excel(data, page_num)
 
 if __name__ == "__main__":
-    base_url = 'https://bina.az/kiraye/menziller'
-    start_page = 401
-    end_page = 667
+    base_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
+    start_page = 1
+    end_page = 561
     scraper = BinaAzScraper(base_url, start_page, end_page)
     scraper.run()
