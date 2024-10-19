@@ -3,7 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import pandas as pd
-import re
+import time
+from requests.exceptions import HTTPError
 
 class BinaAzScraper:
     def __init__(self, base_url, start_page, end_page):
@@ -14,10 +15,21 @@ class BinaAzScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
 
-    def fetch_page(self, url):
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, 'html.parser')
+    def fetch_page(self, url, retries=3):
+        for i in range(retries):
+            try:
+                response = requests.get(url, headers=self.headers)
+                response.raise_for_status()
+                return BeautifulSoup(response.text, 'html.parser')
+            except HTTPError as http_err:
+                print(f"HTTP error occurred: {http_err}")
+                if i < retries - 1:  # Only sleep if there are retries left
+                    time.sleep(2 ** i)  # Exponential backoff: 1, 2, 4 seconds
+                else:
+                    raise
+            except Exception as err:
+                print(f"An error occurred: {err}")
+                break
 
     def parse(self, soup):
         data = []
@@ -82,12 +94,15 @@ class BinaAzScraper:
         for page_num in range(self.start_page, self.end_page + 1):
             url = f'{self.base_url}?page={page_num}'
             print(f'Scraping page {page_num}: {url}')
-            soup = self.fetch_page(url)
-            data = self.parse(soup)
-            self.save_to_excel(data, page_num)
-
-            all_listings.extend(data)
-            print(f"Page {page_num} scraped. Total listings: {len(all_listings)}")
+            try:
+                soup = self.fetch_page(url)
+                data = self.parse(soup)
+                self.save_to_excel(data, page_num)
+                all_listings.extend(data)
+                print(f"Page {page_num} scraped. Total listings: {len(all_listings)}")
+            except HTTPError as e:
+                print(f"Failed to scrape page {page_num}: {e}")
+            time.sleep(2)  # Introduce a delay between page requests
 
         return all_listings
 
