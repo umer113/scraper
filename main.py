@@ -199,8 +199,8 @@ urls = [
 # Start scraping
 scrape_listings(urls)
 if __name__ == "__main__":
-    base_url = 'https://bina.az/kiraye/menziller'
-    start_page = 1
-    end_page = 400
+    base_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
+    start_page = 401
+    end_page = 565
     scraper = BinaAzScraper(base_url, start_page, end_page)
     scraper.run()
