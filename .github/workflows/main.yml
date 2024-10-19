@@ -9,12 +9,15 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3  # Updated to v3
+      uses: actions/checkout@v3
 
-    - name: Set up Python 3.11
+    - name: Set up Python 3.10
       uses: actions/setup-python@v2
       with:
-        python-version: '3.11'
+        python-version: '3.10'
+
+    - name: Install curl_cffi
+      run: pip install curl-cffi==0.10.3
 
     - name: Install dependencies
       run: |
@@ -24,11 +27,11 @@ jobs:
     - name: Run web scraper
       run: python main.py
 
-    - name: List files in output directory  # Debug step to check if the file exists
+    - name: List files in output directory
       run: ls -al output/
 
     - name: Upload Excel file
-      uses: actions/upload-artifact@v3  # Updated to v3
+      uses: actions/upload-artifact@v3
       with:
         name: scraped-data
         path: output/*.xlsx
