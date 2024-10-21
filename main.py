@@ -2,6 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+import os
+
 
 class BinaAzScraper:
     def __init__(self, start_url,start_page, end_page):
