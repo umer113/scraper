@@ -5,7 +5,7 @@ import re
 
 class BinaAzScraper:
     def __init__(self, base_url, start_page, end_page):
-        self.base_url = base_url
+        self.base_url = "https://bina.az"
         self.start_page = start_page
         self.end_page = end_page
         self.headers = {
