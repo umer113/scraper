@@ -26,7 +26,7 @@ jobs:
 
     - name: Run scraper
       run: |
-        python scraper.py
+        python scraper.py  # Ensure this path is correct
 
     - name: Upload Excel files as artifacts
       uses: actions/upload-artifact@v3
