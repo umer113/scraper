@@ -4,7 +4,8 @@ import pandas as pd
 import re
 
 class BinaAzScraper:
-    def __init__(self, base_url, start_page, end_page):
+    def __init__(self, start_url,start_page, end_page):
+        self.start_url = start_url
         self.base_url = "https://bina.az"
         self.start_page = start_page
         self.end_page = end_page
@@ -88,15 +89,15 @@ class BinaAzScraper:
 
     def run(self):
         for page_num in range(self.start_page, self.end_page + 1):
-            url = f'{self.base_url}?page={page_num}'
+            url = f'{self.start_url}?page={page_num}'
             print(f'Scraping page {page_num}: {url}')
             soup = self.fetch_page(url)
             data = self.parse(soup)
             self.save_to_excel(data, page_num)
 
 if __name__ == "__main__":
-    base_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
+    start_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
     start_page = 1
     end_page = 400
-    scraper = BinaAzScraper(base_url, start_page, end_page)
+    scraper = BinaAzScraper(start_url,start_page, end_page)
     scraper.run()
