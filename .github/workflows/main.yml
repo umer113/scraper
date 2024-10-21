@@ -22,11 +22,11 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 pandas openpyxl
+        pip install -r requirements.txt
 
     - name: Run scraper
       run: |
-        python scraper.py  # Ensure this path is correct
+        python main.py  # Adjusted to run main.py instead of scraper.py
 
     - name: Upload Excel files as artifacts
       uses: actions/upload-artifact@v3
