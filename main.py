@@ -54,7 +54,7 @@ class BinaAzScraper:
         area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
         
         # Static property type and transaction type
-        property_type = "garage"
+        property_type = "land"
         transaction_type = "rent"
 
         if transaction_type == 'sale':
@@ -113,7 +113,7 @@ class BinaAzScraper:
             time.sleep(2)  # Add a delay of 2 seconds between each request
 
 if __name__ == "__main__":
-    start_url = 'https://bina.az/kiraye/qarajlar'
+    start_url = 'https://bina.az/kiraye/torpaq'
     start_page = 1
     end_page = 1
     scraper = BinaAzScraper(start_url, start_page, end_page)
