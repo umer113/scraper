@@ -117,7 +117,7 @@ def scrape_listings(urls):
 
 # List of URLs of the webpages to scrape
 urls = [
-    "https://www.propertyfinder.bh/en/buy/properties-for-sale.html"
+    "https://www.propertyfinder.bh/en/search?c=1&bdr[]=1&btr[]=1&fu=0&am[]=AC&ob=mr"
     # Add your URLs here
 ]
 
