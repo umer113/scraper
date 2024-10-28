@@ -24,7 +24,11 @@ def scrape_listings(urls):
             print("========================================================================================================================================")
             print("Scraping page number:", page_number)
             # Construct the URL for the current page
-            url = f"{base_url}?page={page_number}"
+            if '?' in base_url:
+                url = f"{base_url}&page={page_number}"
+            else:
+                url = f"{base_url}?page={page_number}"
+            
             print(url)
             
             # Send a GET request to the webpage
