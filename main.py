@@ -121,7 +121,8 @@ print(f"Total number of properties: {property_count}")
 # Save the scraped data to an Excel file in the 'artifacts' directory
 if scraped_data:
     os.makedirs("artifacts", exist_ok=True)  # Ensure the directory exists
-    filename = os.path.join("artifacts", f"{re.sub(r'[^\w\-_\. ]', '_', main_url)}.xlsx")
+    safe_filename = re.sub(r'[^\w\-_\. ]', '_', main_url)
+    filename = os.path.join("artifacts", f"{safe_filename}.xlsx")
     
     df = pd.DataFrame(scraped_data)
     df.to_excel(filename, index=False)
