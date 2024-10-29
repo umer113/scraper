@@ -1,129 +1,161 @@
 import requests
 from bs4 import BeautifulSoup
 import json
+from urllib.parse import urljoin
 import pandas as pd
+import re
 import os
 
-def scrape_listings(urls):
-    # Define the artifacts folder for saving Excel files
-    save_folder = "artifacts"
+# Base URL of the website
+base_url = 'https://www.bahamasrealty.com'
+main_url = 'https://www.bahamasrealty.com/listings/?minBedrooms=1&minBathrooms=1&propertyTypes=house&amenities=Basement,Beachfront'
 
-    # Create the artifacts directory if it doesn't exist
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-    }
-    
-    for base_url in urls:
-        page_number = 1
-        all_listings = []
+# Start with the first page
+page_number = 1
+consecutive_empty_pages = 0
+property_count = 0
 
-        while True:
-            print("========================================================================================================================================")
-            print("Scraping page number:", page_number)
-            # Construct the URL for the current page
-            if '?' in base_url:
-                url = f"{base_url}&page={page_number}"
-            else:
-                url = f"{base_url}?page={page_number}"
-            
-            print(url)
-            
-            # Send a GET request to the webpage
-            response = requests.get(url, headers=headers)
-            
-            # Check if the request was successful
-            if response.status_code == 200:
-                print("Successfully fetched the page.")
-                # Parse the webpage content
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Find the script tag with id "__NEXT_DATA__"
-                script_tag = soup.find("script", id="__NEXT_DATA__")
-                
-                if script_tag:
-                    print("Found the script tag.")
-                    try:
-                        # Load the JSON data from the script tag
-                        data = json.loads(script_tag.string)
-                        listings_data = data['props']['pageProps']['searchResult']['listings']
-                        
-                        if not listings_data:
-                            print("No data found in JSON. Stopping scrape for this URL.")
-                            break  # Stop scraping for this URL if the data is empty
-                        
-                        # Extract the required data for each listing
-                        for listing in listings_data:
-                            property_data = listing.get('property', {})
-                            location_data = property_data.get('location', {})
-                            coordinates = location_data.get('coordinates', {})
-                            
-                            name = property_data.get('title', '')
-                            price_value = property_data.get('price', {}).get('value', '-')
-                            currency = property_data.get('price', {}).get('currency', '')
-                            period = property_data.get('price', {}).get('period', '')
-                            price = f"{price_value} {currency}/{period}" if price_value != '-' else '-'             
-                            address = location_data.get('full_name', '')
-                            description = property_data.get('description', '-')
-                            property_type = property_data.get('property_type', '-')
-                            transaction_type = property_data.get('offering_type', '-')
-                            area = property_data.get('size', {}).get('value', '-')
-                            amenities = ', '.join(property_data.get('amenity_names', []))
-                            latitude = coordinates.get('lat', '')
-                            longitude = coordinates.get('lon', '')
-                            characteristics = {
-                                'Property Type': property_type,
-                                'Property Size': f"{area} square meters" if area else '-',
-                                'Bedrooms': property_data.get('bedrooms', '-'),
-                                'Bathrooms': property_data.get('bathrooms', '-'),
-                                'Available From': property_data.get('listed_date', '-'),
-                            }
-                            property_url = 'https://www.propertyfinder.bh' + property_data.get('details_path', '-')
+# List to store scraped data
+scraped_data = []
 
-                            listing_data = {
-                                'Name': name,
-                                'Price': price,
-                                'Address': address,
-                                'Description': description,
-                                'Property Type': property_type,
-                                'Transaction Type': transaction_type,
-                                'Area': str(area) + " square meters",
-                                'Amenities': amenities,
-                                'Characteristics': characteristics,
-                                'Latitude': latitude,
-                                'Longitude': longitude,
-                                'Property URL': property_url
-                            }
-                            print("listing:",listing_data)
-                            all_listings.append(listing_data)
-                        
-                        # Increment the page number to move to the next page
-                        page_number += 1
-                    except json.JSONDecodeError as e:
-                        print("Error parsing JSON:", e)
-                        break  # Stop scraping if there is a JSON parsing error
-                else:
-                    # No script tag found, assuming this is the last page
-                    print(f"No script tag found on page {page_number}. Ending scrape for {base_url}.")
-                    break
-            else:
-                print(f'Failed to retrieve the webpage. Status code: {response.status_code}')
-                break
+# List of keywords to search in the description
+keywords = ['commercial', 'condo', 'house', 'land', 'multi-family']
+
+while consecutive_empty_pages < 3:
+    print(f"Scraping page number {page_number}")
+    url = f'{main_url}?page={page_number}'
+
+    try:
+        # Send a GET request to fetch the raw HTML content
+        response = requests.get(url)
+        response.raise_for_status()  # Check if the request was successful
+
+        # Parse the HTML content
+        soup = BeautifulSoup(response.text, 'html.parser')
+        script_tag = soup.find('script', {'type': 'application/json', 'id': 'data-listings'})
         
-        # Save the data to an Excel sheet named after the base URL in the artifacts folder
-        if all_listings:
-            df = pd.DataFrame(all_listings)
-            file_name = os.path.join(save_folder, f"{base_url.replace('https://', '').replace('/', '_').replace('?', '_').replace('&', '_').replace('=', '_')}.xlsx")
-            df.to_excel(file_name, index=False)
-            print(f"Data saved to {file_name}")
+        if script_tag:
+            # Extract JSON data from the script tag
+            json_data = json.loads(script_tag.string)
+            data_scraped = False
 
-# List of URLs of the webpages to scrape
-urls = [
-    "https://www.propertyfinder.bh/en/search?c=3&fu=0&ob=mr"
-    # Add your URLs here
-]
+            # Loop through the JSON data and extract the required information
+            for property in json_data:
+                name = property.get('usmPropertyName', None)
+                address = property.get('address', {}).get('display', 'N/A')
+                price = property.get('listPrice', 'N/A')
 
-# Start scraping
-scrape_listings(urls)
+                # Check if all the required fields are missing
+                if name or address != 'N/A' or price != 'N/A':
+                    property_count += 1
+                    data_scraped = True
+
+                    description = property.get('publicRemarks', 'N/A')
+                    area = property.get('buildingAreaTotal', 'N/A')
+                    bedrooms = property.get('bedroomsTotal', 'N/A')
+                    bathrooms_total = property.get('bathroomsTotalInteger', 'N/A')
+                    lot_size_acres = property.get('lotSizeAcres', 'N/A')
+
+                    characteristics = {
+                        'bedrooms': bedrooms,
+                        'bathrooms_total': bathrooms_total,
+                        'area': area,
+                        'lot_size_acres': lot_size_acres
+                    }
+
+                    if 'sale' in url.lower():
+                        transaction_type = 'sale'
+                    elif 'rent' in url.lower():
+                        transaction_type = 'rent'
+                    else:
+                        transaction_type = 'N/A' 
+
+                    # Determine property type
+                    property_type = property.get('usmPropertyType')
+                    if not property_type or property_type == 'Rentals':
+                        property_type = property.get('propertySubType', [])
+                    
+                    # If property_type is still empty, search keywords in the description
+                    if not property_type:
+                        description_lower = description.lower()
+                        for keyword in keywords:
+                            if keyword in description_lower:
+                                property_type = keyword.capitalize()
+                                break
+                        else:
+                            property_type = 'N/A'
+
+                    latitude = property.get('latitude', 'N/A')
+                    longitude = property.get('longitude', 'N/A')
+
+                    property_url_relative = property.get('usmDetailPath', '')
+                    property_url = urljoin(base_url, property_url_relative)
+
+                    if not name:
+                        try:
+                            property_response = requests.get(property_url)
+                            property_response.raise_for_status()
+                            property_soup = BeautifulSoup(property_response.text, 'html.parser')
+                            meta_tag = property_soup.find('meta', {'property': 'og:title'})
+                            if meta_tag and 'content' in meta_tag.attrs:
+                                name = meta_tag['content']
+                            else:
+                                name = "N/A"
+                        except requests.exceptions.RequestException as e:
+                            print(f"Failed to retrieve property name from {property_url}: {e}")
+                            name = "N/A"
+
+                    # Add the data to the list
+                    scraped_data.append({
+                        'Name': name,
+                        'Address': address,
+                        'Price': price,
+                        'Description': description,
+                        'Area': characteristics['area'],
+                        'Lot Size (Acres)': characteristics['lot_size_acres'],
+                        'Bedrooms': characteristics['bedrooms'],
+                        'Bathrooms (Total)': characteristics['bathrooms_total'],
+                        'Transaction Type': transaction_type,
+                        'Property Type': property_type,
+                        'Latitude': latitude,
+                        'Longitude': longitude,
+                        'Property URL': property_url
+                    })
+
+                    print(scraped_data[-1])
+            if not data_scraped:
+                consecutive_empty_pages += 1
+                print(f"No data scraped on page {page_number}, consecutive empty pages: {consecutive_empty_pages}")
+            else:
+                consecutive_empty_pages = 0
+        else:
+            print(f"No data-listings found on page {page_number}")
+            consecutive_empty_pages += 1
+
+    except requests.exceptions.HTTPError as err:
+        print(f"HTTP error occurred on page {page_number}: {err}")
+        break
+
+    # Move to the next page
+    page_number += 1
+
+# Print the total number of properties
+print(f"Total number of properties: {property_count}")
+
+# Save the scraped data to an Excel file in the 'artifacts' directory
+if scraped_data:
+    # Ensure the 'artifacts' directory exists
+    os.makedirs('artifacts', exist_ok=True)
+
+    # Create a safe file name from the main_url
+    safe_filename = re.sub(r'[^\w\-_\. ]', '_', main_url)
+    filename = f'artifacts/{safe_filename}.xlsx'
+    
+    # Convert the list of dictionaries to a pandas DataFrame
+    df = pd.DataFrame(scraped_data)
+    
+    # Save the DataFrame to an Excel file
+    df.to_excel(filename, index=False)
+    print(f"Data saved to {filename}")
+else:
+    print("No data was scraped.")
