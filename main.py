@@ -8,7 +8,7 @@ import os
 
 # Base URL of the website
 base_url = 'https://www.bahamasrealty.com'
-main_url = 'https://www.bahamasrealty.com/for-rent/'
+main_url = 'https://www.bahamasrealty.com/listings/?status=Active,Pending,Active+Under+Contract,Closed,CNT,PCG'
 
 # Start with the first page
 page_number = 1
