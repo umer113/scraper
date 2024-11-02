@@ -230,7 +230,7 @@ if __name__ == "__main__":
     
     # Specify start and end pages here
     start_page = 1
-    end_page = 1
+    end_page = 30
 
     output_directory = "artifacts"
     if not os.path.exists(output_directory):
