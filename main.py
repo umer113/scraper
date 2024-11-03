@@ -2,7 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-import logging
 import pandas as pd
 from urllib.parse import urlparse
 import os
@@ -33,11 +32,11 @@ def get_lat_lon_from_address(address):
         print(f"Error: {e}")
         return None, None
 
-# Function to get all relevant anchor tags within a page range
-def get_anchor_tags(url, start_page=1, end_page=None):
+# Function to get all relevant anchor tags without defining start and end pages
+def get_anchor_tags(url):
     links = []
-    page_number = start_page
-    while url and (end_page is None or page_number <= end_page):
+    page_number = 1
+    while url:
         r = session.get(url, headers=headers)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "lxml")
@@ -70,47 +69,6 @@ def get_anchor_tags(url, start_page=1, end_page=None):
             break
     return links
 
-# Function to determine the transaction type
-def get_transaction_type(name):
-    rent_keywords = ["rent", "alquiler"]
-    buy_keywords = ["buy", "sale", "venta"]
-    
-    for keyword in rent_keywords:
-        if keyword in name.lower():
-            return "rent"
-    
-    for keyword in buy_keywords:
-        if keyword in name.lower():
-            return "buy"
-    
-    return "unknown"
-
-# Function to determine the property type
-def get_property_type(start_url):
-    property_types = {
-        "new construction": ["new construction", "obra nueva","Obra nueva"],
-        "housing": ["housing", "viviendas","Viviendas","vivienda","Vivienda"],
-        "offices": ["offices", "oficinas","oficina","Oficina","office","offices"],
-        "premises or warehouses": ["premises or warehouses", "locales o naves","locales o nave","Locales o naves","Local","locale","locales"],
-        "garage": ["garage", "garages", "garajes","garaje"],
-        "land": ["land", "terrenos","terreno"],
-        "storerooms": ["storeroom", "storerooms"],
-        "building": ["building", "buildings", "edificios","edificio"],
-        "new home": ["new home"],
-        "home": ["home"],
-        "room": ["room", "Habitación","habitación "],
-        "commercial property": ["commercial property"],
-        "flat / apartment": ["flat", "apartment"],
-        "storage room": ["storage room","Trasteros","Trastero","trastero","trasteros"]
-    }
-    for property_type, keywords in property_types.items():
-        for keyword in keywords:
-            if keyword.lower() in start_url.lower():
-                return property_type
-
-    return "unknown"
-
-# Function to get property type from URL keywords
 def get_property_type_from_url(base_url):
     keywords = {
         "viviendas": "housing",
@@ -134,7 +92,7 @@ def get_transaction_type_from_url(base_url):
         return "rent"
     return "unknown"
 
-# Function to get the property details from the property URL
+# Function to get property details from the property URL
 def get_property_details(property_url, transaction_type, property_type):
     r = session.get(property_url, headers=headers)
     if r.status_code == 200:
@@ -145,8 +103,13 @@ def get_property_details(property_url, transaction_type, property_type):
         name = name_tag.text.strip() if name_tag else None
         
         # Address
-        address_tag = soup.find('span', class_='main-info__title-minor')
-        address = address_tag.text.strip() if address_tag else None
+        address_list = []
+        header_map = soup.find('div', id='headerMap')
+        if header_map:
+            for li in header_map.find_all('li', class_='header-map-list'):
+                address_list.append(li.get_text(strip=True))
+        address = ', '.join(address_list) if address_list else None
+        
         
         # Price
         price_tag = soup.find('strong', class_='price')
@@ -187,6 +150,12 @@ def get_property_details(property_url, transaction_type, property_type):
             for span in features_tag.find_all('span'):
                 features.append(span.text.strip())
 
+        # Energy Certificate
+        energy_certificate_tag = soup.find('div', class_='details-property-feature-two')
+        if energy_certificate_tag:
+            energy_certificate = energy_certificate_tag.get_text(separator=" ").strip()
+            features.append(energy_certificate)
+
         characteristics = []
         characteristics_tags = soup.find_all('div', class_='details-property-feature-one')
         if len(characteristics_tags) > 1:  # Ensure there's a second div
@@ -194,7 +163,6 @@ def get_property_details(property_url, transaction_type, property_type):
                 characteristic = li.text.strip()
                 characteristics.append(characteristic)
    
-
         # Area and characteristics
         area = '-'
         if "m²" in features[0]:
@@ -227,29 +195,23 @@ if __name__ == "__main__":
        'https://www.idealista.com/buscar/venta-viviendas/con-precio-hasta_80000/spain/',
         # Add more URLs as needed
     ]
-    
-    # Specify start and end pages here
-    start_page = 1
-    end_page = 60
 
     output_directory = "artifacts"
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-
+    
     for start_url in start_urls:
         base_url = get_base_url(start_url)
         transaction_type = get_transaction_type_from_url(start_url)
-        print("transaction type: ", transaction_type)
+        print("transaction type: ",transaction_type)
         property_type = get_property_type_from_url(start_url)
-        print("property type: ", property_type)
-        
-        # Get all links within the specified page range
-        all_links = get_anchor_tags(start_url, start_page, end_page)
+        print("property type: ",property_type)
+        all_links = get_anchor_tags(start_url)
         print(f"Total number of links for {base_url}: {len(all_links)}")
         
         data = []
         for link in all_links:
-            details = get_property_details(link['href'], transaction_type, property_type)
+            details = get_property_details(link['href'],transaction_type,property_type)
             print(details)
             if details:
                 data.append(details)
