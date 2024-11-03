@@ -1,226 +1,207 @@
 import requests
+import json
 from bs4 import BeautifulSoup
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+from urllib.parse import urljoin, quote
 import pandas as pd
-from urllib.parse import urlparse
+import time
+import logging
+import re
 import os
 
-# Create session
-session = requests.Session()
-session.cookies.set('SESSION', '1f7c8fa12ffd405e~866b242d-587e-4ec1-a421-b72cb909d12c', domain='www.idealista.com')
-session.cookies.set('contact866b242d-587e-4ec1-a421-b72cb909d12c', "{'maxNumberContactsAllow':10}", domain='www.idealista.com')
-session.cookies.set('datadome', 'USbG0q5kyFe3vsqkR5071Lw0loDqUwQLGK9LyG7mYJHSd5BPQHCF2UrFRQYBRuZgeYbjLXlvKKyND87EpjvQtlvAz4WgmWis01~a~luEyjcKw9q4wyiK_vpBjkjJg_Ws', domain='www.idealista.com')
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36",
-    "Accept-Encoding": "gzip, deflate",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "DNT": "1",
-    "Connection": "close",
-    "Upgrade-Insecure-Requests": "1"
-}
+# Configure logging
+logging.basicConfig(filename='scraper.log', level=logging.ERROR, 
+                    format='%(asctime)s %(levelname)s %(message)s')
 
-def get_lat_lon_from_address(address):
-    geolocator = Nominatim(user_agent="username")
-    try:
-        location = geolocator.geocode(address, timeout=10)
-        if location:
-            return location.latitude, location.longitude
-        else:
-            return None, None
-    except (GeocoderTimedOut, GeocoderServiceError) as e:
-        print(f"Error: {e}")
-        return None, None
-
-# Function to get all relevant anchor tags without defining start and end pages
-def get_anchor_tags(url):
-    links = []
-    page_number = 1
-    while url:
-        r = session.get(url, headers=headers)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.content, "lxml")
-            anchor_tags = soup.find_all('a', class_='item-link')
-            page_links = []
-            for tag in anchor_tags:
-                href = tag.get('href')
-                if not href.startswith('http'):
-                    href = 'https://www.idealista.com' + href
-                page_links.append({'href': href})
-            links.extend(page_links)
-            print(f"Page {page_number} - Number of anchor tags: {len(page_links)}")
-
-            # Find the next page URL
-            next_page_tag = soup.find('li', class_='next')
-            if next_page_tag:
-                next_page_link = next_page_tag.find('a')
-                if next_page_link and 'href' in next_page_link.attrs:
-                    url = next_page_link['href']
-                    if not url.startswith('http'):
-                        url = 'https://www.idealista.com' + url
-                else:
-                    url = None
-            else:
-                url = None
-
-            page_number += 1
-        else:
-            print(f"Failed to retrieve the page, status code: {r.status_code}")
-            break
-    return links
-
-def get_property_type_from_url(base_url):
-    keywords = {
-        "viviendas": "housing",
-        "oficinas": "offices",
-        "locales o naves": "premises or warehouses",
-        "traspasos": "transfers",
-        "garajes": "garage",
-        "terrenos": "land",
-        "trasteros": "storerooms",
-        "edificios": "building"
+# Function to fetch and parse a webpage with retry logic
+def fetch_page(url, retries=3):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
     }
-    for keyword, property_type in keywords.items():
-        if keyword in base_url:
-            return property_type
-    return "unknown"
-
-def get_transaction_type_from_url(base_url):
-    if "venta" in base_url:
-        return "sale"
-    elif "alquiler" in base_url:
-        return "rent"
-    return "unknown"
-
-# Function to get property details from the property URL
-def get_property_details(property_url, transaction_type, property_type):
-    r = session.get(property_url, headers=headers)
-    if r.status_code == 200:
-        soup = BeautifulSoup(r.content, "lxml")
-        
-        # Name
-        name_tag = soup.find('span', class_='main-info__title-main')
-        name = name_tag.text.strip() if name_tag else None
-        
-        # Address
-        address_list = []
-        header_map = soup.find('div', id='headerMap')
-        if header_map:
-            for li in header_map.find_all('li', class_='header-map-list'):
-                address_list.append(li.get_text(strip=True))
-        address = ', '.join(address_list) if address_list else None
-        
-        
-        # Price
-        price_tag = soup.find('strong', class_='price')
-        price = price_tag.text.strip() if price_tag else None
-        
-        # Description
-        description = None
-        comment_tag = soup.find('div', class_='comment')
-        if comment_tag:
-            description_paragraph = comment_tag.find('p')
-            if description_paragraph:
-                description = description_paragraph.get_text(separator="\n").strip()  
-        
-        # Properties
-        properties_tag = soup.find('div', class_='details-property')
-        properties = []
-        if properties_tag:
-            for ul in properties_tag.find_all('ul'):
-                for li in ul.find_all('li'):
-                    properties.append(li.text.strip())
-
-        latitude, longitude = (None, None)
-
-        # Geocode the address
-        if address:
-            latitude, longitude = get_lat_lon_from_address(address)
-            if not (latitude and longitude):
-                primary_location = address.split(",")[0].strip()
-                latitude, longitude = get_lat_lon_from_address(primary_location)
-            if not (latitude and longitude) and len(address.split(",")) > 1:
-                secondary_location = address.split(",")[1].strip()
-                latitude, longitude = get_lat_lon_from_address(secondary_location)
-
-        # Features
-        features = []
-        features_tag = soup.find('div', class_='info-features')
-        if features_tag:
-            for span in features_tag.find_all('span'):
-                features.append(span.text.strip())
-
-        # Energy Certificate
-        energy_certificate_tag = soup.find('div', class_='details-property-feature-two')
-        if energy_certificate_tag:
-            energy_certificate = energy_certificate_tag.get_text(separator=" ").strip()
-            features.append(energy_certificate)
-
-        characteristics = []
-        characteristics_tags = soup.find_all('div', class_='details-property-feature-one')
-        if len(characteristics_tags) > 1:  # Ensure there's a second div
-            for li in characteristics_tags[1].find_all('li'):
-                characteristic = li.text.strip()
-                characteristics.append(characteristic)
-   
-        # Area and characteristics
-        area = '-'
-        if "m²" in features[0]:
-            area = features[0]
-        return {
-            'url': property_url,
-            'name': name,
-            'address': address,
-            'price': price,
-            'area': area,
-            'description': description,
-            "characteristics": characteristics,
-            'properties': properties,
-            "Features": features,
-            'transaction_type': transaction_type,
-            'property_type': property_type,
-            'latitude': latitude,
-            'longitude': longitude
-        }
-    else:
-        print(f"Failed to retrieve the property page, status code: {r.status_code}")
-        return None
-
-def get_base_url(url):
-    parsed_url = urlparse(url)
-    return parsed_url.netloc
-
-if __name__ == "__main__":
-    start_urls = [
-       'https://www.idealista.com/buscar/venta-viviendas/con-precio-hasta_80000/spain/',
-        # Add more URLs as needed
-    ]
-
-    output_directory = "artifacts"
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-    
-    for start_url in start_urls:
-        base_url = get_base_url(start_url)
-        transaction_type = get_transaction_type_from_url(start_url)
-        print("transaction type: ",transaction_type)
-        property_type = get_property_type_from_url(start_url)
-        print("property type: ",property_type)
-        all_links = get_anchor_tags(start_url)
-        print(f"Total number of links for {base_url}: {len(all_links)}")
-        
-        data = []
-        for link in all_links:
-            details = get_property_details(link['href'],transaction_type,property_type)
-            print(details)
-            if details:
-                data.append(details)
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return BeautifulSoup(response.content, 'html.parser')
+        except requests.exceptions.HTTPError as e:
+            logging.error(f"HTTPError: {e} for URL: {url}")
+            if attempt < retries - 1:
+                print(f"HTTPError: {e}, retrying ({attempt + 1}/{retries})...")
+                time.sleep(2)  # Wait before retrying
             else:
-                print(f"Property URL: {link['href']} - Details: Not Found")
+                print(f"Failed to fetch {url} after {retries} attempts.")
+                return None
+        except requests.exceptions.RequestException as e:
+            logging.error(f"RequestException: {e} for URL: {url}")
+            return None
+
+def extract_lat_long(url):
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            script_tag = soup.find('script', id="__NEXT_DATA__", type="application/json")
+
+            if not script_tag or not script_tag.string:
+                return '-', '-'
+
+            json_data = json.loads(script_tag.string)
+
+            listing_id_match = re.search(r'-(\d+)/$', url)
+            if listing_id_match:
+                listing_id = listing_id_match.group(1)
+            else:
+                return '-', '-'
+
+            listing_key = f'ListingDetail:{listing_id}'
+            apollo_state = json_data.get('props', {}).get('apolloState', {})
+
+            if not apollo_state or listing_key not in apollo_state:
+                logging.error(f"Missing data for URL: {url}")
+                return '-', '-'
+
+            geo_location_ref = apollo_state[listing_key].get('geoLocation', {}).get('id', None)
+
+            if not geo_location_ref:
+                logging.error(f"Missing 'geoLocation' for listing key {listing_key} in URL: {url}")
+                return '-', '-'
+
+            geo_location_data = apollo_state.get(geo_location_ref, None)
+            if geo_location_data:
+                latitude = geo_location_data.get('latitude', '-')
+                longitude = geo_location_data.get('longitude', '-')
+                return latitude, longitude
+            else:
+                logging.error(f"Missing geo location data for reference {geo_location_ref} in URL: {url}")
+                return '-', '-'
+
+        else:
+            logging.error(f"Failed to fetch page for URL: {url}, status code: {response.status_code}")
+            return '-', '-'
+
+    except Exception as e:
+        logging.error(f"Error in extract_lat_long for URL: {url}: {str(e)}")
+        return '-', '-'
+
+# Function to extract property details
+def extract_property_details(soup, transaction_type, property_url):
+    details = {}
+    details['name'] = soup.select_one('h1.display-address').text if soup.select_one('h1.display-address') else None
+    
+    # price in local currency:
+    price_element = soup.select_one('div.sc-10v3xoh-1.cqrlhJ')
+    details['price_in_local_currency'] = price_element.text.strip() if price_element else None
+
+    details['price'] = soup.select_one('div.property-price').text.strip() if soup.select_one('div.property-price') else None
+    details['description'] = soup.select_one('pre.property-description').text.strip() if soup.select_one('pre.property-description') else None
+    details['area'] = None  # Initialize area as None
+    details['property_type'] = soup.select_one('div.feature-item:last-child').text.strip() if soup.select_one('div.feature-item:last-child') else None
+    details['transaction_type'] = transaction_type
+    details['property_url'] = property_url
+
+    # Scrape latitude and longitude
+    latitude, longitude = extract_lat_long(property_url)
+    details['latitude'] = latitude
+    details['longitude'] = longitude
+
+    # Initialize a dictionary for characteristics
+    characteristics = {}
+    
+    # Extract characteristics as key-value pairs
+    characteristic_elements = soup.select('div.sc-12iqlu8-0.hMXWVZ')
+    for element in characteristic_elements:
+        key = element.select_one('div.basicInfoKey').text.strip() if element.select_one('div.basicInfoKey') else None
+        value = element.select_one('div.basicInfoValue').text.strip() if element.select_one('div.basicInfoValue') else None
+        if key and value:
+            characteristics[key] = value
+    
+    # Add characteristics to details
+    details['characteristics'] = characteristics
+    details['Address'] = characteristics.get("Address","-")
+
+    # Attempt to extract area from characteristics
+    details['area'] = characteristics.get("Building Size", None) or characteristics.get("Land Size", None)
+
+    if not details['area']:
+        area_element = soup.find('div', class_='props-name', text='Floor Area')
+        if area_element:
+            area_value = area_element.find_next('div', class_='props-value').find('span').text.strip()
+            details['area'] = area_value
+
+    return details
+
+# Function to check if there is a next page
+def has_next_page(soup):
+    next_button = soup.select_one('li.ant-pagination-next a')
+    return bool(next_button)
+
+# Function to extract property URLs and transaction types from a page
+def extract_property_urls_and_transactions(soup, base_url):
+    properties = []
+    listings = soup.select('div.sc-1dun5hk-0.cOiOrj > a')
+    for listing in listings:
+        url = urljoin(base_url, listing['href'])
+        transaction_type_div = soup.select_one('div.sc-1mgu4iw-2.Wxcys.channel')
+        transaction_type = transaction_type_div.text.strip() if transaction_type_div else 'Unknown'
+        properties.append({'url': url, 'transaction_type': transaction_type})
+    return properties
+
+# Function to sanitize the URL to make it a valid filename
+def sanitize_url_for_filename(url):
+    return quote(url, safe='')
+
+# Ensure artifacts directory exists
+os.makedirs('artifacts', exist_ok=True)
+
+# List of base URLs
+base_urls = [
+    "https://www.realtor.com/international/jm",
+]
+
+# Loop through each base URL
+for base_url in base_urls:
+    current_page_num = 1
+    all_properties = []
+
+    while True:
+        if current_page_num == 1:
+            current_url = base_url
+        else:
+            if '?' in base_url:
+                current_url = f"{base_url}&page={current_page_num}"
+            else:
+                current_url = f"{base_url}/p{current_page_num}"
         
-        # Save data to Excel
-        df = pd.DataFrame(data)
-        sanitized_url = start_url.replace('https://', '').replace('/', '_').replace('.', '_')
-        excel_file_path = os.path.join(output_directory, f'{sanitized_url}.xlsx')
-        df.to_excel(excel_file_path, index=False)
-        print(f"Data saved to {excel_file_path}")
+        soup = fetch_page(current_url)
+        if soup is None:
+            break
+        
+        page_properties = extract_property_urls_and_transactions(soup, base_url)
+        all_properties.extend(page_properties)
+        
+        print(f"Number of properties on page {current_page_num} for {current_url}: {len(page_properties)}")
+        
+        if not has_next_page(soup):
+            break
+        
+        current_page_num += 1
+
+    print(f"Total number of properties collected for {base_url}: {len(all_properties)}")
+
+    property_details_list = []
+    for property in all_properties:
+        property_soup = fetch_page(property['url'])
+        if property_soup:
+            details = extract_property_details(property_soup, property['transaction_type'], property['url'])
+            print(details)
+            property_details_list.append(details)
+            print(f"Extracted details for URL: {property['url']}")
+        else:
+            print(f"Skipping URL: {property['url']} due to a fetch error.")
+
+    print(f"Total properties scraped for {base_url}: {len(property_details_list)}")
+
+    # Save to an Excel file in the artifacts directory
+    df = pd.DataFrame(property_details_list)
+    sanitized_filename = os.path.join('artifacts', sanitize_url_for_filename(base_url) + ".xlsx")
+    df.to_excel(sanitized_filename, index=False)
+    print(f"Data saved to {sanitized_filename}")
