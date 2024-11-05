@@ -40,7 +40,7 @@ def scrape_property_urls(base_url):
     return list(property_links)
 
 # Function to scrape details from a property URL
-def scrape_property_details(url):
+def scrape_property_details(url,transaction_type):
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
     
@@ -63,7 +63,6 @@ def scrape_property_details(url):
     
     property_type = characteristics.get("Type", None)
     area = characteristics.get("Area", None)
-    transaction_type = "For Sale" if "For Sale" in soup.find('p', class_='property__about-subtitle').get_text() else None
     features = [li.get_text().strip() for li in soup.find('div', class_='property__special').find('ul').find_all('li')] if soup.find('div', class_='property__special') else []
     
     geolocator = Nominatim(user_agent="YourAppName")
@@ -92,12 +91,18 @@ def scrape_multiple_urls(base_urls):
 
     for base_url in base_urls:
         print(f"Scraping base URL: {base_url}")
+        transaction_type = ''
+        if "buy" in base_url:
+            transaction_type = "buy"
+        elif "rent" in base_url:
+            transaction_type = "rent"
+            
         property_urls = scrape_property_urls(base_url)
         scraped_data = []
         
         for property_url in property_urls:
             print(f"Scraping property: {property_url}")
-            property_data = scrape_property_details(property_url)
+            property_data = scrape_property_details(property_url,transaction_type)
             print(property_data)
             scraped_data.append(property_data)
         
