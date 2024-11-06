@@ -48,27 +48,30 @@ def scrape_property_details(property_url):
     # price
     price_tag = soup.find('div', class_='price_area')
     price = price_tag.get_text(separator=" ", strip=True) if price_tag else 'N/A'
-
-    # Extract characteristics (targeting the second occurrence)
+            
+    # Extract characteristics
     characteristics = {}
     characteristics_sections = soup.find_all('div', class_='panel-body')
-
     if len(characteristics_sections) > 1:
         second_characteristics_section = characteristics_sections[1]
         characteristics_tags = second_characteristics_section.find_all('div', class_='listing_detail')
-
         for char_tag in characteristics_tags:
             label = char_tag.find('strong')
             if label:
                 key = label.text.strip().rstrip(':')
-                value = ''.join([sibling.strip() for sibling in label.next_siblings if isinstance(sibling, str) or sibling.name == 'span']).strip()
+                value = ''.join(sibling.strip() for sibling in label.next_siblings if isinstance(sibling, str) or sibling.name == 'span').strip()
                 characteristics[key] = value
 
-    # Extract property type
+    # Extract property size or lot size
+    property_size = characteristics.get('Property Size', '-')
+    if property_size == '-':
+        property_size = characteristics.get('Property Lot Size', '-')
+    if price in ['Starting Million', 'Million', '', 'Million Million']:
+        price = characteristics.get("Price", "N/A")
+
+    # Extract property type and transaction type
     property_type_tag = soup.find('div', class_='property_title_label actioncat')
     property_type = property_type_tag.text.strip() if property_type_tag else '-'
-
-    # Extract transaction type
     transaction_type_tag = soup.find('div', class_='property_title_label')
     transaction_type = transaction_type_tag.text.strip() if transaction_type_tag else '-'
 
@@ -84,12 +87,12 @@ def scrape_property_details(property_url):
     latitude = map_tag['data-cur_lat'] if map_tag and 'data-cur_lat' in map_tag.attrs else None
     longitude = map_tag['data-cur_long'] if map_tag and 'data-cur_long' in map_tag.attrs else None
 
-    area = characteristics.get("Property Size", '-') 
+    area = characteristics.get("Property Size", "-") 
     if area == '-':
-        area = characteristics.get("Property Lot Size", '-')
+        area = characteristics.get("Property Lot Size", "-")
 
     return {
-        'URL' : property_url,
+        'URL': property_url,
         'Name': name,
         'Description': description,
         'Address': address,
@@ -115,29 +118,25 @@ def scrape_data_for_url(base_url):
 
     pagination_links = soup.find_all('li', class_='roundright')
     total_pages = int(pagination_links[-1].find('a')['href'].split('/')[-2]) if pagination_links else 1
-    
+
+    print(f"Total pages for {base_url}: {total_pages}")
     all_property_urls = []
     for page in range(1, total_pages + 1):
         all_property_urls.extend(scrape_property_urls(base_url, page))
     
     print(f"Found {len(all_property_urls)} property URLs for {base_url}")
+    all_properties = [scrape_property_details(url) for url in all_property_urls]
     
-    all_properties = []
-    for property_url in all_property_urls:
-        print(f"Scraping property details from {property_url}...")
-        all_properties.append(scrape_property_details(property_url))
-    
-    # Save data to an Excel file in the `artifacts` folder
+    # Save the data to an Excel file in the artifacts folder
     os.makedirs('artifacts', exist_ok=True)
     base_url_cleaned = re.sub(r'[^a-zA-Z0-9]', '_', base_url.strip('/').replace('https://', ''))
     output_file = f"artifacts/{base_url_cleaned}.xlsx"
-    df = pd.DataFrame(all_properties)
-    df.to_excel(output_file, index=False)
+    pd.DataFrame(all_properties).to_excel(output_file, index=False)
     print(f"Data saved to {output_file}")
 
 # Array of base URLs to scrape
 base_urls = [
-    'https://boahiyaa.com/maldives-properties-for-rent/',
+   'https://boahiyaa.com/maldives-properties-for-rent/',
 ]
 
 # Loop through all base URLs and scrape data
