@@ -114,7 +114,7 @@ def scrape_multiple_urls(base_urls):
 
 # Example usage with multiple URLs
 base_urls = [
-    "https://www.shweproperty.com/en/buy-property",
+    "https://www.shweproperty.com/en/rent-property",
 ]
 
 scrape_multiple_urls(base_urls)
