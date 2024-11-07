@@ -3,37 +3,54 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import pandas as pd
+from geopy.geocoders import Nominatim
 
-# Ensure the artifacts directory exists
-os.makedirs("artifacts", exist_ok=True)
-
+# Headers for the requests
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 
-def get_property_urls(base_url):
+# Function to get latitude and longitude from an address
+def get_lat_lon(address):
+    geolocator = Nominatim(user_agent="my_geocoder_app")  # Change "my_geocoder_app" to something unique
+    try:
+        location = geolocator.geocode(address)
+        if location:
+            return location.latitude, location.longitude
+        else:
+            return None, None
+    except Exception as e:
+        return None, None
+
+# Function to get property URLs from a base URL with pagination
+def get_property_urls(base_url, start_page, end_page):
     property_urls = []
-    page = 1
-    while True:
+    query_mode = '&page=' if '?' in base_url else '?page='
+
+    for page in range(start_page, end_page + 1):
         print(f"Scraping page {page} for {base_url}")
-        current_url = f"{base_url}?page={page}"
+
+        current_url = f"{base_url}{query_mode}{page}"
         response = requests.get(current_url, headers=headers)
 
         if response.status_code != 200:
-            print(f"Failed to retrieve page {page}, status code: {response.status_code}")
+            print(f"Failed to retrieve page {page} from {current_url}, status code: {response.status_code}")
             break
 
         soup = BeautifulSoup(response.content, 'html.parser')
-        page_property_urls = ['https://cm.coinafrique.com' + link.get('href') for link in soup.find_all('a', class_='card-image ad__card-image waves-block waves-light')]
+        page_property_urls = ['https://ci.coinafrique.com' + link.get('href') for link in soup.find_all('a', class_='card-image ad__card-image waves-block waves-light')]
+
         if not page_property_urls:
             print(f"No more property URLs found on page {page}. Stopping.")
             break
+
         property_urls.extend(page_property_urls)
-        page += 1
+        print(f"Collected {len(page_property_urls)} property URLs from page {page}")
 
     print(f"Total property URLs collected: {len(property_urls)}")
     return property_urls
 
+# Function to scrape data from a single property URL
 def scrape_property_data(url):
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
@@ -48,7 +65,7 @@ def scrape_property_data(url):
 
     try:
         description_div = soup.find('div', class_='ad__info__box ad__info__box-descriptions')
-        description = description_div.find_all('p')[1].text.strip() if description_div else None
+        description = description_div.find_all('p')[1].text.strip()
     except (AttributeError, IndexError):
         description = None
 
@@ -90,17 +107,12 @@ def scrape_property_data(url):
     except AttributeError:
         transaction_type = None
 
-    try:
-        hidden_input = soup.find('input', attrs={'id': 'country'})
-        hidden_value = hidden_input['value'] if hidden_input else '{}'
-        hidden_data = json.loads(hidden_value)
-        latitude = hidden_data.get('latitude', None)
-        longitude = hidden_data.get('longitude', None)
-    except (AttributeError, json.JSONDecodeError):
-        latitude = None
-        longitude = None
+    if address:
+        latitude, longitude = get_lat_lon(address)
+    else:
+        latitude, longitude = None, None
 
-    return {
+    property_data = {
         'name': name,
         'address': address,
         'price': price,
@@ -114,17 +126,31 @@ def scrape_property_data(url):
         'characteristics': characteristics
     }
 
-def scrape_multiple_urls(urls):
-    for base_url in urls:
-        property_urls = get_property_urls(base_url)
-        properties_data = [scrape_property_data(url) for url in property_urls if scrape_property_data(url)]
+    print(property_data)
+    return property_data
 
-        # Save data to Excel file in the artifacts directory
+# Function to scrape multiple URLs and save to Excel files in the 'artifacts' directory
+def scrape_multiple_urls(urls, start_page, end_page):
+    os.makedirs("artifacts", exist_ok=True)
+
+    for base_url in urls:
+        property_urls = get_property_urls(base_url, start_page, end_page)
+
+        properties_data = []
+        for index, property_url in enumerate(property_urls):
+            print(f"Scraping property {index + 1} of {len(property_urls)} from {base_url}")
+            data = scrape_property_data(property_url)
+            if data:
+                properties_data.append(data)
+
         df = pd.DataFrame(properties_data)
         excel_file_name = f"artifacts/{base_url.replace('https://', '').replace('/', '_').replace('?', '_').replace('&', '_').replace('=', '_')}.xlsx"
         df.to_excel(excel_file_name, index=False, sheet_name='Properties')
 
         print(f"Data from {base_url} saved to {excel_file_name}")
 
-urls = ["https://cm.coinafrique.com/categorie/immobilier"]
-scrape_multiple_urls(urls)
+# Example usage
+urls = [
+    "https://ci.coinafrique.com/categorie/immobilier"
+]
+scrape_multiple_urls(urls, start_page=1, end_page=30)
