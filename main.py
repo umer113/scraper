@@ -1,133 +1,106 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import os
 import re
 
-# Function to scrape property URLs from a single page
-def scrape_property_urls(base_url, page_num):
-    if "?" in base_url:
-        url = f"{base_url.split('?')[0]}/page/{page_num}/?" + base_url.split('?')[1]
-    else:
-        url = f"{base_url}page/{page_num}/"
+class BinaAzScraper:
+    def __init__(self, start_url,start_page, end_page):
+        self.start_url = start_url
+        self.base_url = "https://bina.az"
+        self.start_page = start_page
+        self.end_page = end_page
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+        }
 
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    def fetch_page(self, url):
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return BeautifulSoup(response.text, 'html.parser')
 
-    print(f"Scraping URL: {url}")
-    
-    # Find all property divs
-    property_divs = soup.find_all('div', class_='item active')
-    
-    # Extract property URLs
-    property_urls = []
-    for div in property_divs:
-        a_tag = div.find('a')
-        if a_tag and 'href' in a_tag.attrs:
-            property_urls.append(a_tag['href'])
-    
-    return property_urls
+    def parse(self, soup):
+        data = []
+        # Extract property URLs
+        property_urls = [a['href'] for a in soup.select('a.item_link')]
+        for url in property_urls:
+            full_url = self.base_url + url
+            data.append(self.parse_property(full_url))
 
-# Function to scrape property details from a single property URL
-def scrape_property_details(property_url):
-    response = requests.get(property_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Extract details (name, description, address, price, etc.)
-    name_tag = soup.find('h1', class_='entry-title entry-prop')
-    name = name_tag.text.strip() if name_tag else '-'
-    description_tag = soup.find('div', class_='wpestate_property_description')
-    description = description_tag.get_text(separator=" ", strip=True) if description_tag else '-'
-    address_tag = soup.find('div', class_='property_categs')
-    address = address_tag.text.strip() if address_tag else '-'
-    price_tag = soup.find('div', class_='price_area')
-    price = price_tag.get_text(separator=" ", strip=True) if price_tag else 'N/A'
+        return data
 
-    characteristics = {}
-    characteristics_sections = soup.find_all('div', class_='panel-body')
-    if len(characteristics_sections) > 1:
-        second_characteristics_section = characteristics_sections[1]
-        characteristics_tags = second_characteristics_section.find_all('div', class_='listing_detail')
-        for char_tag in characteristics_tags:
-            label = char_tag.find('strong')
-            if label:
-                key = label.text.strip().rstrip(':')
-                value = ''.join(sibling.strip() for sibling in label.next_siblings if sibling.name == 'span' or isinstance(sibling, str))
-                characteristics[key] = value.strip()
+    def parse_property(self, url):
+        soup = self.fetch_page(url)
+        name = soup.select_one('h1.product-title').get_text(strip=True)
+        address = soup.select_one('div.product-map__left__address').get_text(strip=True)
+        area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
+        
+        # Static property type and transaction type
+        property_type = "newly built apartments"
+        transaction_type = "rent"
 
-    property_size = characteristics.get('Property Size', '-')
-    if property_size == '-':
-        property_size = characteristics.get('Property Lot Size', '-')
-    if price in ['Starting Million', 'Million', '', "Million Million"]:
-        price = characteristics.get("Price","N/A")
 
-    property_type_tag = soup.find('div', class_='property_title_label actioncat')
-    property_type = property_type_tag.text.strip() if property_type_tag else '-'
-    transaction_type_tag = soup.find('div', class_='property_title_label')
-    transaction_type = transaction_type_tag.text.strip() if transaction_type_tag else '-'
+        price_val = soup.select_one('div.product-price__i--bold .price-val')
+        price_cur = soup.select_one('div.product-price__i--bold .price-cur')
 
-    features = {}
-    features_tags = soup.find_all('div', class_='feature_chapter_name')
-    for feature_tag in features_tags:
-        category = feature_tag.text.strip()
-        features[category] = [detail_tag.text.strip() for detail_tag in feature_tag.find_next_siblings('div', class_='listing_detail')]
+        if transaction_type == 'sale':
+            price = f"{price_val.get_text(strip=True)} {price_cur.get_text(strip=True)}" if price_val and price_cur else "N/A"
+        else:
+            price_value = price_val.get_text(strip=True) if price_val else "N/A"
+            price_currency = price_cur.get_text(strip=True) if price_cur else "N/A"
+            price_period = soup.select_one('div.product-price__i--bold .price-per')
+            price_period_text = price_period.get_text(strip=True) if price_period else ""
+            price = f"{price_value} {price_currency} {price_period_text}"
 
-    map_tag = soup.find('div', id='googleMapSlider')
-    latitude = map_tag['data-cur_lat'] if map_tag and 'data-cur_lat' in map_tag.attrs else None
-    longitude = map_tag['data-cur_long'] if map_tag and 'data-cur_long' in map_tag.attrs else None
 
-    area = characteristics.get("Property Size", "-") if property_size == '-' else property_size
+        description_div = soup.select_one('div.product-description__content')
+        description = description_div.get_text(separator='\n', strip=True) if description_div else None
+        
+        # Scrape latitude and longitude directly from the div
+        map_div = soup.select_one('div#item_map')
+        latitude = map_div['data-lat'] if map_div else None
+        longitude = map_div['data-lng'] if map_div else None
 
-    return {
-        'URL': property_url,
-        'Name': name,
-        'Description': description,
-        'Address': address,
-        'Price': price,
-        'Area (ft2)': area,
-        'Characteristics': characteristics,
-        'Property Type': property_type,
-        'Transaction Type': transaction_type,
-        'Features': features,
-        'Latitude': latitude,
-        'Longitude': longitude
-    }
+        characteristics = {}
+        characteristics_divs = soup.select('div.product-properties__column .product-properties__i')
+        for div in characteristics_divs:
+            label = div.select_one('label.product-properties__i-name').get_text(strip=True)
+            value = div.select_one('span.product-properties__i-value').get_text(strip=True)
+            characteristics[label] = value
 
-# Function to scrape data from start_page to end_page for a given base URL
-def scrape_data_for_url(base_url, start_page=1, end_page=30):
-    all_property_urls = []
-    page = start_page
+        property_data = {
+            'url': url,
+            'name': name,
+            'price': price,
+            'description': description,
+            'address': address,
+            'latitude': latitude,
+            'longitude': longitude,
+            'characteristics': characteristics,
+            'area': area,
+            'property_type': property_type,   # Statically defined
+            'transaction_type': transaction_type,   # Statically defined
+        }
+        print(property_data)
+        return property_data
 
-    while end_page is None or page <= end_page:
-        property_urls = scrape_property_urls(base_url, page)
-        if not property_urls:
-            break
-        all_property_urls.extend(property_urls)
-        page += 1
+   def save_to_excel(self, data, page_num):
+        df = pd.DataFrame(data)
+        os.makedirs('artifacts', exist_ok=True)  # Ensure the artifacts directory exists
+        file_name = f'artifacts/bina_az_page_{page_num}.xlsx'  # Save in artifacts folder
+        df.to_excel(file_name, index=False, engine='openpyxl')
+        print(f'Saved data for page {page_num} to {file_name}')
 
-    print(f"Found {len(all_property_urls)} property URLs from page {start_page} to {end_page}")
+    def run(self):
+        for page_num in range(self.start_page, self.end_page + 1):
+            url = f'{self.start_url}?page={page_num}'
+            print(f'Scraping page {page_num}: {url}')
+            soup = self.fetch_page(url)
+            data = self.parse(soup)
+            self.save_to_excel(data, page_num)
 
-    all_properties = []
-    for property_url in all_property_urls:
-        print(f"Scraping property details from {property_url}...")
-        property_details = scrape_property_details(property_url)
-        all_properties.append(property_details)
-
-    # Ensure the 'artifacts' directory exists
-    os.makedirs('artifacts', exist_ok=True)
-
-    # Save to Excel in the 'artifacts' folder
-    base_url_cleaned = re.sub(r'[^a-zA-Z0-9]', '_', base_url.strip('/').replace('https://', ''))[:15]
-    output_file = f"artifacts/{base_url_cleaned}_p{start_page}_to_p{end_page}.xlsx"
-    df = pd.DataFrame(all_properties)
-    df.to_excel(output_file, index=False)
-    print(f"Data saved to {output_file}")
-
-# Array of base URLs to scrape with specified start and end pages
-base_urls = [
-    ('https://boahiyaa.com/advanced-search/?geolocation_search=&geolocation_lat=&geolocation_long=&filter_search_type%5B%5D=&filter_search_action%5B%5D=&property_status=&submit=Search&elementor_form_id=21142', 1, 5),
-]
-
-# Loop through all base URLs and scrape data within the specified page range
-for base_url, start_page, end_page in base_urls:
-    scrape_data_for_url(base_url, start_page, end_page)
+if __name__ == "__main__":
+    start_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
+    start_page = 1
+    end_page = 400
+    scraper = BinaAzScraper(start_url,start_page, end_page)
+    scraper.run()
