@@ -1,10 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import os
 import re
 
 class BinaAzScraper:
-    def __init__(self, start_url,start_page, end_page):
+    def __init__(self, start_url, start_page, end_page):
         self.start_url = start_url
         self.base_url = "https://bina.az"
         self.start_page = start_page
@@ -35,9 +36,8 @@ class BinaAzScraper:
         area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
         
         # Static property type and transaction type
-        property_type = "newly built apartments"
-        transaction_type = "rent"
-
+        property_type = "Apartments"
+        transaction_type = "sale"
 
         price_val = soup.select_one('div.product-price__i--bold .price-val')
         price_cur = soup.select_one('div.product-price__i--bold .price-cur')
@@ -50,7 +50,6 @@ class BinaAzScraper:
             price_period = soup.select_one('div.product-price__i--bold .price-per')
             price_period_text = price_period.get_text(strip=True) if price_period else ""
             price = f"{price_value} {price_currency} {price_period_text}"
-
 
         description_div = soup.select_one('div.product-description__content')
         description = description_div.get_text(separator='\n', strip=True) if description_div else None
@@ -83,7 +82,7 @@ class BinaAzScraper:
         print(property_data)
         return property_data
 
-   def save_to_excel(self, data, page_num):
+    def save_to_excel(self, data, page_num):
         df = pd.DataFrame(data)
         os.makedirs('artifacts', exist_ok=True)  # Ensure the artifacts directory exists
         file_name = f'artifacts/bina_az_page_{page_num}.xlsx'  # Save in artifacts folder
@@ -102,5 +101,5 @@ if __name__ == "__main__":
     start_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
     start_page = 1
     end_page = 450
-    scraper = BinaAzScraper(start_url,start_page, end_page)
+    scraper = BinaAzScraper(start_url, start_page, end_page)
     scraper.run()
