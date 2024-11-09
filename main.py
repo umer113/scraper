@@ -2,7 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import os
-import re
 
 class BinaAzScraper:
     def __init__(self, start_url, start_page, end_page):
@@ -13,6 +12,7 @@ class BinaAzScraper:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
+        self.all_data = []
 
     def fetch_page(self, url):
         response = requests.get(url, headers=self.headers)
@@ -21,12 +21,10 @@ class BinaAzScraper:
 
     def parse(self, soup):
         data = []
-        # Extract property URLs
         property_urls = [a['href'] for a in soup.select('a.item_link')]
         for url in property_urls:
             full_url = self.base_url + url
             data.append(self.parse_property(full_url))
-
         return data
 
     def parse_property(self, url):
@@ -35,26 +33,16 @@ class BinaAzScraper:
         address = soup.select_one('div.product-map__left__address').get_text(strip=True)
         area = next((span.get_text() for span in soup.select('span.product-properties__i-value') if 'm²' in span.get_text()), None)
         
-        # Static property type and transaction type
         property_type = "Apartments"
         transaction_type = "sale"
 
         price_val = soup.select_one('div.product-price__i--bold .price-val')
         price_cur = soup.select_one('div.product-price__i--bold .price-cur')
-
-        if transaction_type == 'sale':
-            price = f"{price_val.get_text(strip=True)} {price_cur.get_text(strip=True)}" if price_val and price_cur else "N/A"
-        else:
-            price_value = price_val.get_text(strip=True) if price_val else "N/A"
-            price_currency = price_cur.get_text(strip=True) if price_cur else "N/A"
-            price_period = soup.select_one('div.product-price__i--bold .price-per')
-            price_period_text = price_period.get_text(strip=True) if price_period else ""
-            price = f"{price_value} {price_currency} {price_period_text}"
+        price = f"{price_val.get_text(strip=True)} {price_cur.get_text(strip=True)}" if price_val and price_cur else "N/A"
 
         description_div = soup.select_one('div.product-description__content')
         description = description_div.get_text(separator='\n', strip=True) if description_div else None
         
-        # Scrape latitude and longitude directly from the div
         map_div = soup.select_one('div#item_map')
         latitude = map_div['data-lat'] if map_div else None
         longitude = map_div['data-lng'] if map_div else None
@@ -74,20 +62,20 @@ class BinaAzScraper:
             'address': address,
             'latitude': latitude,
             'longitude': longitude,
-            'characteristics': characteristics,
+            'characteristics': str(characteristics),  # Store as string
             'area': area,
-            'property_type': property_type,   # Statically defined
-            'transaction_type': transaction_type,   # Statically defined
+            'property_type': property_type,
+            'transaction_type': transaction_type
         }
         print(property_data)
         return property_data
 
-    def save_to_excel(self, data, page_num):
-        df = pd.DataFrame(data)
-        os.makedirs('artifacts', exist_ok=True)  # Ensure the artifacts directory exists
-        file_name = f'artifacts/bina_az_page_{page_num}.xlsx'  # Save in artifacts folder
+    def save_all_data_to_excel(self):
+        df = pd.DataFrame(self.all_data)
+        os.makedirs('artifacts', exist_ok=True)
+        file_name = 'artifacts/bina_az_all_pages.xlsx'
         df.to_excel(file_name, index=False, engine='openpyxl')
-        print(f'Saved data for page {page_num} to {file_name}')
+        print(f'Saved all data to {file_name}')
 
     def run(self):
         for page_num in range(self.start_page, self.end_page + 1):
@@ -95,7 +83,8 @@ class BinaAzScraper:
             print(f'Scraping page {page_num}: {url}')
             soup = self.fetch_page(url)
             data = self.parse(soup)
-            self.save_to_excel(data, page_num)
+            self.all_data.extend(data)
+        self.save_all_data_to_excel()
 
 if __name__ == "__main__":
     start_url = 'https://bina.az/kiraye/menziller/yeni-tikili'
