@@ -87,7 +87,7 @@ class BinaAzScraper:
 
 if __name__ == "__main__":
     start_url = 'https://bina.az/alqi-satqi/menziller'
-    start_page = 351
-    end_page = 700
+    start_page = 701
+    end_page = 1050
     scraper = BinaAzScraper(start_url, start_page, end_page)
     scraper.run()
