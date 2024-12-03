@@ -67,7 +67,6 @@ class BinaAzScraper:
             'property_type': property_type,
             'transaction_type': transaction_type
         }
-        print(property_data)
         return property_data
 
     def save_all_data_to_excel(self):
