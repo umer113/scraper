@@ -86,7 +86,7 @@ class BinaAzScraper:
         self.save_all_data_to_excel()
 
 if __name__ == "__main__":
-    start_url = 'https://bina.az/alqi-satqi/heyet-evleri'
+    start_url = 'https://bina.az/alqi-satqi/ofisler'
     start_page = 1
     end_page = 5
     scraper = BinaAzScraper(start_url, start_page, end_page)
